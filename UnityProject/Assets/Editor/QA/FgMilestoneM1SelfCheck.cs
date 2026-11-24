@@ -325,6 +325,13 @@ namespace GameLogic.EditorTools
 
         // ── E. 旅程登记 ──────────────────────────────────────────────────────────
 
+        internal static readonly (string Kind, string[] Ids)[] ReverseSteps =
+        {
+            ("资源不足", new[] { "r1_print_denied", "r1_print_ok" }), ("路径失败", new[] { "r4_reject", "r2_click_bad", "r2_click_ok" }),
+            ("暂停与倍速", new[] { "r3_uplink_paused", "r3_speed_locked", "r3_rate05", "r3_rate2", "r3_rate3" }), ("断链", new[] { "r4_drive", "r6_wait" }),
+            ("存读档", new[] { "r5_menu", "r5_loaded" }), ("目标死亡", new[] { "r7_kill", "r7_after" }),
+        };
+
         private static void CheckJourneyCatalog()
         {
             Line("  · E. 旅程登记：FGJ-M1 覆盖出口旅程 9 步 + 接入中存读档；FGJ-M1R 覆盖 IC-REQ-022 六类；FGJ-M0 改用跟随键");
@@ -343,12 +350,7 @@ namespace GameLogic.EditorTools
             List<string> missing = exit.Where(e => m1 == null || m1.Steps.All(x => x.Id != e.Id)).Select(e => e.Step).ToList();
             Expect(Wellformed(m1) && missing.Count == 0 && m1.Seed == FgjM1Journey.TestSeed,
                 $"FGJ-M1：{m1?.Steps.Count} 步、步骤 ID 不重复、每步有超时与检查、固定种子 {m1?.Seed}；出口旅程各步都有对应步骤{(missing.Count == 0 ? string.Empty : "，缺：" + string.Join("、", missing))}");
-            var reverse = new (string Kind, string[] Ids)[]
-            {
-                ("资源不足", new[] { "r1_print_denied", "r1_print_ok" }), ("路径失败", new[] { "r4_reject", "r2_click_bad", "r2_click_ok" }),
-                ("暂停与倍速", new[] { "r3_uplink_paused", "r3_speed_locked", "r3_rate05", "r3_rate2", "r3_rate3" }), ("断链", new[] { "r4_drive", "r6_wait" }),
-                ("存读档", new[] { "r5_menu", "r5_loaded" }), ("目标死亡", new[] { "r7_kill", "r7_after" }),
-            };
+            var reverse = ReverseSteps;
             List<string> missingR = reverse.Where(k => m1r == null || k.Ids.Any(id => m1r.Steps.All(x => x.Id != id))).Select(k => k.Kind).ToList();
             Expect(Wellformed(m1r) && missingR.Count == 0 && m1r.Seed != m1.Seed,
                 $"FGJ-M1R：{m1r?.Steps.Count} 步；六类反向场景（每类都有“出错 → 恢复”两端）齐全{(missingR.Count == 0 ? string.Empty : "，缺：" + string.Join("、", missingR))}；种子 {m1r?.Seed} ≠ FGJ-M1 的 {m1?.Seed}（B25 种子无关）");

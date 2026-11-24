@@ -38,7 +38,7 @@ namespace GameLogic.EditorTools.JourneyBots
     /// 5. 断链：攻城中禁用全部还在发电的发电机（开局那台、圈里的发电机 2）→ 炮塔缺电停火（原因写明）→ 逐台启用 → 炮塔恢复开火；
     /// 6. 目标死亡：接入的机器开进敌群被打死 → 信号回到归还核心（原因写明）、黑匣子回收；家园机器全灭 → 应急打印救回家园。
     /// 突袭用“剧情节点触发”入口排定（进度夹具 ApplyRaidFixture：家园突袭的正式触发 = 暴露越过阈值，FGJ-M6 已从正式入口走三波；这里要 3 波、每波在可控时刻）；
-    /// 屏障 / 陷阱研究用进度夹具 ApplyResearchFixture（研究本身由 FGJ-M6 走正式入口）。夹具只在这两个方法里（[M6 出口] A2 守护），见 ADR-QA-023 第 5 节。
+    /// 屏障 / 陷阱由圈里的仿真实验室真实研究（FG15-QA-01 修复第 2 轮删掉研究夹具，DEBT-FG6E2E01-02 关闭）。夹具只在登记的方法里（[M6 出口] A2 守护），见 ADR-QA-023 第 5 节。
     /// </summary>
     public static class FgjM6ReverseJourney
     {
@@ -57,7 +57,7 @@ namespace GameLogic.EditorTools.JourneyBots
             Seed = TestSeed,
             TotalTimeoutSeconds = 4800,
             OnFinish = Cleanup,
-            Version = 2,
+            Version = 3, // FG15-QA-01 修复第 2 轮：开局研究改由仿真实验室真实研究（步骤变了，旧断点作废）
             CheckpointAfter = new[] { "built", "r1_flow", "pf_built", "rb_wall", "rs_wall", "rc_leave" },
             Steps = new List<JourneyStep>
             {
@@ -84,14 +84,24 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("salv2_sel", "左键点机器", 20, c => FgjM1Journey.ClickMachine(c, "workerB"), c => FgjM1Journey.TickSelected(c, "workerB"), retries: 4),
                 S("salvage2", "右键点第二处开局残骸（拆解）", 20, FgjM3Common.RightClickWreck2, FgjM3Common.TickWreck2Ordered, retries: 4),
                 S("salv2_wait", "等残骸拆完", 180, null, FgjM3Common.TickWreck2Done),
-                S("research_fixture", "进度夹具：研发树“防御 · 屏障与闸门”“防御 · 陷阱发射器”记为已研究（研究由 FGJ-M6 走正式入口）", 10, ApplyResearchFixture, TickResearchFixture),
-
-                // ── 布防：屏障圈（留出闸门位）、圈里两座炮塔与发电机 2、陷阱发射器与少接一格的抽水线 ──
-                S("plan", "看地形：核心外挑一圈能完全围死的位置（离仓库最近的一格留作闸门位）、圈里两座炮塔与发电机 2、离核心最近的抽水线与陷阱发射器、回收站", 30, null, TickPlan),
+                // ── 布防：屏障圈（留出闸门位）、圈里两座炮塔、发电机 2 与仿真实验室、陷阱发射器与少接一格的抽水线 ──
+                // FG15-QA-01（DEBT-FG6E2E01-02 关闭）：屏障与闸门、陷阱发射器不再用研究夹具——圈里放一座仿真实验室、研发树排队、等实验室真实研究完，再放陷阱发射器、拖屏障圈。
+                S("plan", "看地形：核心外挑一圈能完全围死的位置（离仓库最近的一格留作闸门位）、圈里两座炮塔、发电机 2 与仿真实验室、离核心最近的抽水线与陷阱发射器、回收站", 30, null, TickPlan),
                 S("build_open", "按建造键打开建造模式", 10, c => FgjM3Common.PressBuild(true), c => FgjM3Common.TickBuild(c, true), retries: 1),
-                S("place", "放发电机 2、回收站与带、两座炮塔、陷阱发射器、泵与抽水线（故意少接泵旁那一格）", 300, null, c => P.TickActions(c, "rp", 40), retries: 2),
+                S("place", "放发电机 2、回收站与带、仿真实验室、两座炮塔、泵与抽水线（故意少接泵旁那一格；陷阱发射器还没研究，研究完再放）", 300, null, c => P.TickActions(c, "rp", 40), retries: 2),
                 S("build_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
-                Idle("built0", "机器取料施工：炮塔、发电机 2、回收站、陷阱发射器、泵与管线建成接电（屏障圈后面再拖）", 1500, null, c => TickBuilt(c, false)),
+                S("rt_open", "按研发树键（默认 K）打开研发树", 10, c => JourneyInput.PressToggleTo(GameActionId.OpenResearch, () => ResearchTreePanelUIToolkit.IsOpen, true), c => M.TickTreeOpen(c, true), retries: 1),
+                S("rt_q", "依次点分支筛选、左键点节点排进研究队列：防御 · 屏障与闸门、防御 · 陷阱发射器", 60, null, c => D.TickQueueAll(c, new[] { D.NodeBarrier, D.NodeTrap }), retries: 2),
+                S("rt_close", "再按研发树键关闭研发树", 10, c => JourneyInput.PressToggleTo(GameActionId.OpenResearch, () => ResearchTreePanelUIToolkit.IsOpen, false), c => M.TickTreeOpen(c, false), retries: 1),
+                Idle("built0", "机器取料施工：炮塔、发电机 2、回收站、仿真实验室、泵与管线建成接电（屏障圈后面再拖）", 1500, null, c => TickBuilt(c, false)),
+                Idle("rt_wait", "等研究：防御 · 屏障与闸门、防御 · 陷阱发射器（仿真实验室把技术数据换成研究点）", 1500, null, c => D.TickResearched(c, D.NodeBarrier, D.NodeTrap)),
+                // 研究做完就停用实验室：它不管队列空不空都按每分钟 2 件吃技术数据，后面复原 / 熔合要用（玩家同样会关掉闲着的实验室）。
+                S("rl_open", "左键点仿真实验室，打开通用面板", 40, null, c => P.TickOpenPanel(c, D.Lab, P.P(c, "rlab")), retries: 2),
+                S("rl_off", "点“禁用”：研究做完了，实验室不再取技术数据", 15, null, c => TickToggle(c, D.Lab, P.P(c, "rlab"), true), retries: 1),
+                S("rl_close", "点“关闭”", 10, null, P.TickClosePanel, retries: 1),
+                S("trap_place", "建造栏选陷阱发射器（刚研究出来），单击抽水线末端旁那一格", 60, null, c => P.TickActions(c, "rptrap", 30), retries: 2),
+                S("trap_close", "按建造键关闭建造模式", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
+                Idle("trap_built", "机器取料施工：陷阱发射器建成接电", 600, null, c => M.TickBuilt(c, new[] { "trap" }, Array.Empty<string>(), false, "陷阱发射器")),
 
                 // ── 1. 资源不足：陷阱缺水 → 补上管线 ──
                 S("r1_open", "建造模式里左键点陷阱发射器，通用面板上点“陷阱…”：防御面板打开", 30, null,
@@ -167,12 +177,15 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("fu_sub", "进度夹具：芯片基板放进仓库（DEBT-FG5E2E01-02）", 10, ApplySubstrateFixture, M.TickSubstrateFixture),
                 S("fu_close", "按 Esc 关闭合成台面板（通用面板也关）", 15, null, c => M.TickCloseAll(c, () => !FusionPanelUIToolkit.IsOpen, "合成台面板"), retries: 1),
                 S("fu_build_close2", "按建造键关闭建造模式（开着的话）", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
+                // FG15-QA-01（fu_rolled 根因）：合成台类别是“其它”（三种职能偏好代价 120 米），只有当它是开路场此刻要去的地方才会被站定打（CombatSiege.RoleTarget）——
+                // 圈完整时圈里的核心 / 发电机开路场走不到，圈外离抵达点最近的合成台就是突击 / 破坏型的去处；圈上留着第二波打剩的残血墙（实测南面 45/260）会被一打就穿，敌人直接进圈、不再管合成台。
+                S("rs_ring", "第三波之前，屏障圈上掉了耐久还立着的屏障逐座左键点它、通用面板点“维修”修满（圈上有残血墙，敌人一到就打穿进圈）", 900, null, c => TickWallRestored(c, anywhere: false, worn: true)),
                 S("rs_fix", "进度夹具：剧情节点再触发一波（2 级：FG-GAP-146，1 级部队在合成台旁的两座炮塔前损失过重撤退、拆不掉合成台）", 10, c => ApplyRaidFixture(c, 2), c => TickRaidRequested(c, "rs")),
                 Idle("rs_warn", "等预警（来袭方向与第一波相同：合成台就在抵达点旁边）", 600, null, c => TickWarned(c, "rs")),
                 S("rs_slow", "按 1 倍速键（部队快到了，留出在合成台上操作的时间）", 10, c => JourneyInput.PressAction(GameActionId.SpeedNormal), c => TickSpeedIs(c, 1f), retries: 1),
                 S("fu_open2", "左键点电路合成台，通用面板上点“熔合…”", 40, null, c => M.TickSubPanel(c, "synth", "PrFusion", FusionOpen, "合成台面板打开"), retries: 2),
                 S("fu_pick2", "固件 A 选过载、固件 B 选液氮", 15, null, TickPickPair, retries: 1),
-                S("fu_eta", "看预警条：部队离抵达只剩 20 游戏秒以内（合成台面板开着等）", 300, null, TickRaidClose),
+                S("fu_eta", "看预警条：部队离抵达只剩 10 游戏秒以内（合成台面板开着等）", 300, null, TickRaidClose),
                 S("fu_formal", "点“正式熔合…”，确认框点“确认”：入队（两枚父固件被预留，芯片基板 ×2 与技术数据记在任务上）", 20, null, c => TickFormalQueued(c, 1), retries: 1),
                 S("fu_pick3", "（第一项入队后）看固件 A / B 还是过载 / 液氮，不是就重新选", 15, null, TickPickPair, retries: 1),
                 S("fu_formal2", "再点一次“正式熔合…”、确认：第二项排在后面（这台合成台上一共 60 游戏秒的熔合）", 20, null, c => TickFormalQueued(c, 2), retries: 1),
@@ -181,6 +194,8 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("fu_close2", "按 Esc 关掉合成台面板（通用面板也关）：两项熔合在合成台上照常进行", 15, null, c => M.TickCloseAll(c, () => !FusionPanelUIToolkit.IsOpen, "合成台面板"), retries: 1),
                 S("fu_build_close3", "按建造键关闭建造模式（开着的话）", 10, c => FgjM3Common.PressBuild(false), c => FgjM3Common.TickBuild(c, false), retries: 1),
                 S("rs_siege", "部队到达、展开攻城（合成台就在抵达点旁边；展开时自动暂停就按暂停键继续）", 400, null, c => TickSieging(c, "rs")),
+                // FG15-QA-01：整包第 3 / 4 次没有一台突袭者把合成台当目标（突击型去打装配站），合成台被流弹慢慢打掉——先断言规则让它成了目标，再看回滚。
+                S("fu_target", "展开后至少一台突袭者以电路合成台为目标（它对每个展开位都比圈外其它建筑近）", 60, null, TickSynthTargeted),
                 S("fu_rolled", "攻城单位拆掉正在熔合的电路合成台：熔合事务回滚——父固件预留释放、芯片基板与技术数据退回、通知“熔合中止”；突袭结算记下合成台这处损失", 300, null, TickRaidRolledBack),
                 S("rs_fast", "按 3 倍速键", 10, c => JourneyInput.PressAction(GameActionId.SpeedTriple), FgjM1Journey.TickSpeed3, retries: 1),
                 Idle("rs_end", "这一波结束（只结算一次）", 400, null, c => TickRaidOver(c, "rs")),
@@ -193,6 +208,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rc_fix", "进度夹具：剧情节点再触发一波", 10, c => ApplyRaidFixture(c), c => TickRaidRequested(c, "rc")),
                 Idle("rc_warn", "等预警", 600, null, c => TickWarned(c, "rc")),
                 S("rc_list", "记下还活着的家园机器（前几波里可能已有机器阵亡、应急打印过），至多两台", 10, null, TickListVictims),
+                S("rc_frail", "进度夹具（DEBT-FG15QA01-03）：两台受害机器耐久降到 BAL-REC-024 之前的出厂值 100（出厂 800 后家园攻城里只有射程内没有职能目标的突袭者才打机器，四波打不死）", 10, ApplyFrailFixture, TickFrail),
                 S("rc_sel_a0", "左键点第一台家园机器", 20, c => FgjM1Journey.ClickMachine(c, "victimA"), c => FgjM1Journey.TickSelected(c, "victimA"), retries: 8),
                 S("rc_send_a", "右键点预警条写的抵达点（右键地面 = 移动）：它从闸门出圈去迎敌", 30, c => RightClickArrival(c, "victimA"), c => TickSentToArrival(c, "victimA"), retries: 2),
                 S("rc_sel_b0", "左键点第二台家园机器（只剩一台就跳过）", 20, c => { if (c.GetInt("victimB") > 0) { FgjM1Journey.ClickMachine(c, "victimB"); } },
@@ -200,6 +216,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rc_send_b", "右键点抵达点：第二台也去", 30, c => RightClickArrival(c, "victimB"), c => TickSentToArrival(c, "victimB"), retries: 2),
                 S("rc_charge", "部队离抵达不到 30 游戏秒时左键点第一台、按接入键（直控）等着，部队一展开就冲进敌群（直控中攻城展开不自动暂停，FG-GAP-114）——机器被打死，信号回到归还核心或弹到最近能接入的机器（原因写明），黑匣子回收；这一波打完它还活着就再请一波", 1500, null, TickUplinkedDies),
                 S("rc_sel_b", "看还有哪些家园机器活着（第一台阵亡后信号回核心或弹到另一台）", 10, null, c => StepOutcome.Done($"还活着的家园机器：{string.Join("、", Victims(c).Where(MachineAlive).Select(FgjM1Journey.Label))}（信号在 {(SignalPresence.AtCore ? "归还核心" : FgjM1Journey.Label(SignalPresence.CurrentMachineLogicId))}）")),
+                S("rc_frail2", "进度夹具（同 rc_frail）：还活着的受害机器耐久再降到 100（前面几波之后可能被修回）", 10, ApplyFrailFixture, TickFrail),
                 S("rc_attack", "剩下的家园机器：信号在谁身上就直控它开进敌群，否则左键选中、右键点这一波的抵达点（右键地面 = 移动）、到了按守备键原地守着，部队一展开就打它——都被打死、家园机器全灭 → 应急打印一台机器救回家园；这一波打完还有活着的就再来一波", 1500, null, TickWipedAndPrinted, retries: 1),
                 S("rc_back", "第三波（含加的几波）结束：结算记着阵亡的家园机器，炮塔照常守住", 400, null, TickThirdWaveBack),
                 S("rc_leave", "信号还在机器上（阵亡后弹到了别的机器、处于直控）就按接入键离开：信号回到归还核心、镜头回战略视角（建造与通用面板要在战略视角里）", 15,
@@ -267,18 +284,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private static long NowMs() => FgjM2Common.NowMs();
 
-        // ── 进度夹具（只在这两个方法里；[M6 出口] A2 守护）───────────────────────────────
-
-        /// <summary>
-        /// 进度夹具（DEBT-FG6E2E01-02，ADR-QA-023 第 5 节）：研发树“防御 · 屏障与闸门”“防御 · 陷阱发射器”记为已研究——研究本身（实验室、排队、研究点）由 FGJ-M6 走正式入口；
-        /// 反向旅程测的是防御出错与恢复，不再花 10 分钟研究。之后的放置、施工、配置全走正式流程。
-        /// </summary>
-        private static void ApplyResearchFixture(JourneyContext c) => ResearchService.CompleteForTests(St, D.NodeBarrier, D.NodeTrap);
-
-        private static StepOutcome TickResearchFixture(JourneyContext c) =>
-            ResearchService.IsCompleted(St, D.NodeBarrier) && ResearchService.IsCompleted(St, D.NodeTrap)
-                ? StepOutcome.Done("进度夹具：屏障与闸门、陷阱发射器记为已研究（研究由 FGJ-M6 走正式入口；DEBT-FG6E2E01-02）")
-                : StepOutcome.Fail("研究夹具没有生效");
+        // ── 进度夹具（只在登记的方法里；[M6 出口] A2 守护）──────────────────────────────
 
         /// <summary>
         /// 进度夹具（DEBT-FG6E2E01-03，ADR-QA-023 第 5 节）：剧情节点触发一波 1 级突袭（突袭导演的剧情入口，不受开局宽限与最短间隔限制）。
@@ -396,17 +402,18 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             a.Add(P.ActB(rp.Plan.B("recycler")));
             a.Add(P.ActR(P.BeltT1, "path.r_recycler", rp.Plan.R("r_recycler").GoalDir, "回收站废料带 → 仓库输入口"));
+            a.Add(P.ActB(rp.Plan.B("rlab"))); // 回收站之后放：废料先够回收站，实验室不够时等回收站拆出来
             a.Add(P.ActB(rp.Plan.B("t1")));
             a.Add(P.ActB(rp.Plan.B("t2")));
-            a.Add(P.ActB(trap));
             a.Add(P.ActC(P.PumpTool, rp.Pump, "泵（水源上）"));
             a.Add(P.ActC(P.PipeT1, rp.Water[1], "抽水线第 2 格"));
             a.Add(P.ActC(P.PipeT1, rp.Water[2], "抽水线第 3 格（陷阱发射器旁边）"));
             P.SetActions(c, "rp", a);
-            P.SetActions(c, "rpfix", new[] { P.ActC(P.PipeT1, rp.Water[0], "补上泵旁那一格管线") });
+            P.SetActions(c, "rptrap", new[] { P.ActB(trap) });
+            P.SetActions(c, "rpfix",new[] { P.ActC(P.PipeT1, rp.Water[0], "补上泵旁那一格管线") });
             P.SetActions(c, "pfgate", new[] { $"B|gate|{rp.GateAt.X}|{rp.GateAt.Y}|0|闸门 {D.Cell(rp.GateAt)}" });
             return StepOutcome.Done($"规划：屏障圈（核心外框外 {rp.RingMargin} 格）{rp.WallRuns.Count} 段 {rp.WallCells} 格 + 闸门位 {D.Cell(rp.GateAt)}（先空着）；" +
-                                    $"圈里炮塔 {D.Cell(rp.Plan.B("t1").Pivot)}、{D.Cell(rp.Plan.B("t2").Pivot)}，发电机 2 {string.Join("、", rp.Plan.Generators.Select(D.Cell))}；" +
+                                    $"圈里炮塔 {D.Cell(rp.Plan.B("t1").Pivot)}、{D.Cell(rp.Plan.B("t2").Pivot)}，发电机 2 {string.Join("、", rp.Plan.Generators.Select(D.Cell))}，仿真实验室 {D.Cell(rp.Plan.B("rlab").Pivot)}；" +
                                     $"泵 {D.Cell(rp.Pump)} → 管线 {string.Join("、", rp.Water.Select(D.Cell))} → 陷阱发射器 {D.Cell(rp.TrapAt)}；回收站 {D.Cell(rp.Plan.B("recycler").Pivot)}");
         }
 
@@ -416,7 +423,8 @@ namespace GameLogic.EditorTools.JourneyBots
             JourneyCommon.ResumeIfAutoPaused(c);
             CampaignState s = St;
             var notBuilt = new List<string>();
-            foreach (string k in new[] { "recycler", "t1", "t2", "trap" })
+            // built0：实验室刚建成、陷阱发射器研究完才放（trap_built 另等）；built：实验室已停用，不再算。
+            foreach (string k in wallsToo ? new[] { "recycler", "t1", "t2", "trap" } : new[] { "recycler", "t1", "t2", "rlab" })
             {
                 if (!P.BuildingReady(s, c.Get(k + ".type"), P.P(c, k), out _))
                 {
@@ -449,7 +457,7 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             return StepOutcome.Done(wallsToo
                 ? $"屏障圈建成：{walls} 格把核心围住（闸门位空着）；废料 {s.Scrap}；{P.PowerLine(s)}"
-                : $"布防建成：圈里两座炮塔与发电机 2、回收站、陷阱发射器、泵与两格管线；废料 {s.Scrap}；{P.PowerLine(s)}");
+                : $"布防建成：圈里两座炮塔、发电机 2 与仿真实验室、回收站、泵与两格管线；废料 {s.Scrap}；{P.PowerLine(s)}");
         }
 
         // ── 发电机槽（断链段：攻城开始前还在发电的那几台，至多 3 台）──────────────────────────
@@ -559,6 +567,42 @@ namespace GameLogic.EditorTools.JourneyBots
             HomeInventory.Add(St, BuildingOps.RepairKitId, amount, clampToSpace: false);
             c.SetInt("core.kits", c.GetInt("core.kits") + amount);
             c.Log($"维修件夹具：仓库补 {amount} 件（DEBT-FG10E2E01-05）");
+        }
+
+        /// <summary>BAL-REC-024 之前的出厂耐久（FGJ-M6R 目标死亡段按这个耐久设计、调过波次强度）。</summary>
+        private const float FrailHealth = 100f;
+
+        /// <summary>
+        /// 进度夹具（DEBT-FG15QA01-03）：还活着、耐久高于 100 的受害机器，走内核伤害请求（与正常挨打同一路径）把耐久降到 100——
+        /// FG15-BAL-01 把出厂耐久 100 → 800（BAL-REC-024）后，家园攻城里突袭者只在射程内没有职能目标时才打机器（CombatSite.Siege RoleTarget 之后的自卫），
+        /// 静默 1 级加波四波只打掉 410 耐久（FG15-QA-01 实测），目标死亡段等不到阵亡。野外拦截真打交 FG15-E2E-01。
+        /// </summary>
+        private static void ApplyFrailFixture(JourneyContext c)
+        {
+            CombatSite site = D.HomeSite;
+            var done = new List<string>();
+            foreach (int id in Victims(c).Where(MachineAlive))
+            {
+                if (site != null && MachineRegistry.TryGetRecord(id, out MachineRecord m) && m.Health > FrailHealth && site.TryGetMachineUnit(id, out int u))
+                {
+                    done.Add($"{FgjM1Journey.Label(id)} {m.Health:F0} → {FrailHealth:F0}");
+                    site.Kernel.Damage(u, m.Health - FrailHealth, 0);
+                }
+            }
+            c.Log($"受害机器耐久夹具（DEBT-FG15QA01-03）：{(done.Count == 0 ? "都不高于 100，没动" : string.Join("、", done))}");
+        }
+
+        private static StepOutcome TickFrail(JourneyContext c)
+        {
+            if (c.StepElapsed < 0.6)
+            {
+                return StepOutcome.Wait;
+            }
+            List<string> high = Victims(c).Where(MachineAlive).Where(id => MachineRegistry.TryGetRecord(id, out MachineRecord m) && m.Health > FrailHealth + 0.5f)
+                .Select(id => FgjM1Journey.Label(id)).ToList();
+            return high.Count == 0
+                ? StepOutcome.Done($"受害机器耐久：{string.Join("、", Victims(c).Select(id => $"{FgjM1Journey.Label(id)} {(MachineRegistry.TryGetRecord(id, out MachineRecord m) ? m.Health : 0):F0}"))}")
+                : StepOutcome.Fail("夹具后耐久还高于 100：" + string.Join("、", high));
         }
 
         /// <summary>FG-GAP-149：第三波之前家园至少两台机器（只剩一台时等归还核心应急打印，正式规则）。</summary>
@@ -1074,7 +1118,8 @@ namespace GameLogic.EditorTools.JourneyBots
         private static StepOutcome TickWallRestored(JourneyContext c) => TickWallRestored(c, anywhere: false);
 
         /// <param name="anywhere">FG9-ACT1-01 修复轮：true = 家园里被打坏的建筑都修（不限于屏障圈上 / 圈里），熔合段之前用。</param>
-        private static StepOutcome TickWallRestored(JourneyContext c, bool anywhere, Func<BuildingRecord, bool> only = null)
+        /// <param name="worn">FG15-QA-01（FGJ-M6R fu_rolled 根因）：true = 圈上掉了耐久还立着的屏障也逐座点“维修”修满（不只修废墟）。</param>
+        private static StepOutcome TickWallRestored(JourneyContext c, bool anywhere, Func<BuildingRecord, bool> only = null, bool worn = false)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
             CampaignState s = St;
@@ -1083,9 +1128,10 @@ namespace GameLogic.EditorTools.JourneyBots
             if (string.IsNullOrEmpty(c.Get(tk)))
             {
                 // 这一波拆坏的屏障 / 闸门 / 圈里的建筑逐座修（屏障优先：圈上有洞，下一波直接走进来）。
-                BuildingRecord pick = n >= (anywhere ? 20 : 10) ? null : s.BuildingRecords
+                BuildingRecord pick = n >= (anywhere || worn ? 30 : 10) ? null : s.BuildingRecords
                     .Where(b => b != null && b.RegionId == HomeValleyLayout.RegionId && b.BuildingTypeId != HomeValleyLayout.BuildingTypeCore && !HomeValleyController.IsPlannedGhost(b) && (anywhere || OnOrInsideRing(c, b)) && (only == null || only(b))
-                                && (b.ConstructionState != BuildingConstructionState.Operational && b.ConstructionState != BuildingConstructionState.Disabled || BuildingOps.Durability(b) <= 0.5f))
+                                && (b.ConstructionState != BuildingConstructionState.Operational && b.ConstructionState != BuildingConstructionState.Disabled || BuildingOps.Durability(b) <= 0.5f
+                                    || worn && DefenseCatalog.IsDraggable(b.BuildingTypeId) && BuildingOps.IsWorn(b)))
                     .OrderBy(b => DefenseCatalog.IsDraggable(b.BuildingTypeId) ? 0 : 1).ThenBy(b => BuildingOps.Durability(b)).FirstOrDefault();
                 // 只修被拆成废墟的（圈上的洞）；掉了耐久还立着的墙照样挡路，不在这一类里测。
                 if (pick == null)
@@ -1116,7 +1162,7 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return StepOutcome.Fail("要修的那座建筑连虚影都没了");
             }
-            bool full = w.ConstructionState == BuildingConstructionState.Operational && BuildingOps.Durability(w) > 0.5f;
+            bool full = w.ConstructionState == BuildingConstructionState.Operational && BuildingOps.Durability(w) > 0.5f && !(worn && BuildingOps.IsWorn(w));
             if (full)
             {
                 c.Set(FgjM3Common.SK(c, "done"), (string.IsNullOrEmpty(c.Get(FgjM3Common.SK(c, "done"))) ? string.Empty : c.Get(FgjM3Common.SK(c, "done")) + "、") + $"{BuildingOps.NameOf(w)} {D.Cell(new GridCell(w.GridX, w.GridY))}");
@@ -1165,6 +1211,16 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 StepOutcome o = P.TickOpenPanel(c, w.BuildingTypeId, new GridCell(w.GridX, w.GridY), "wall" + k);
                 return o.Status == JourneyStepStatus.Retry ? o : StepOutcome.Wait;
+            }
+            if (worn && BuildingOps.IsWorn(w) && !FgjM3Common.Done(c, "kit" + k))
+            {
+                // 受损还立着的墙用维修件修（与 rs_core 修核心同一个夹具，DEBT-FG10E2E01-05：M6R 不建零件工坊产线）。
+                int lack = BuildingOps.RepairKitsFor(w) - HomeInventory.Stock(s, BuildingOps.RepairKitId);
+                if (lack > 0)
+                {
+                    ApplyRepairKitFixture(c, lack);
+                }
+                FgjM3Common.Mark(c, "kit" + k);
             }
             if (!FgjM3Common.Once(c, "rep" + k, () => FgjM3Common.ClickPanelBodyButton(P.PanelHost, "ProductionPanelBody", "BpRepair")))
             {
@@ -1834,7 +1890,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 return StepOutcome.Fail("第一波预警时没记下抵达点");
             }
             var at = new Vector2(float.Parse(c.Get("ra.apx"), CultureInfo.InvariantCulture), float.Parse(c.Get("ra.apy"), CultureInfo.InvariantCulture));
-            GridCell? pivot = D.PlanSynthNear(s, M.Synth, at, c.GetInt("walls.margin"), P.P(c, "gate"), out string why);
+            GridCell? pivot = D.PlanSynthNear(s, M.Synth, at, c.GetInt("walls.margin"), P.P(c, "gate"), out string why, raiderNearest: true);
             if (!pivot.HasValue)
             {
                 return StepOutcome.Fail("合成台规划不出来：" + why);
@@ -1896,7 +1952,8 @@ namespace GameLogic.EditorTools.JourneyBots
         private static TransitGroupRecord RaidGroup(string planId) =>
             GameLogic.Campaign.WorldSim.WorldTransitSystem.Groups(St).FirstOrDefault(g => g != null && g.PlanId == planId);
 
-        /// <summary>部队离抵达只剩 20 游戏秒以内（预警条倒计时；或已经到了）：这时排两项正式熔合（各 30 游戏秒），部队到达展开时第二项一定还在熔合。</summary>
+        /// <summary>部队离抵达只剩 10 游戏秒以内（预警条倒计时；或已经到了）：这时排两项正式熔合（各 30 游戏秒），展开后约 50 游戏秒第二项还在熔合。
+        /// FG15-QA-01：原为 20 秒（展开后只剩约 40 秒），回归包整包跑里合成台展开后约 37 秒才被拆、第二项只差 3 秒就做完——临界；排完熔合、关面板约 3 秒，10 秒仍在展开前。</summary>
         private static StepOutcome TickRaidClose(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
@@ -1908,12 +1965,79 @@ namespace GameLogic.EditorTools.JourneyBots
             RaidResultRecord r = RaidResultService.FindByPlan(St, c.Get("rs.plan"));
             bool arrived = r != null && r.UnfoldTick >= 0 || g != null && g.State != TransitGroupState.Marching;
             double eta = g != null ? GameLogic.Campaign.WorldSim.WorldTransitSystem.EtaSeconds(g) : 0;
-            if (!arrived && (g == null || eta > 20))
+            if (!arrived && (g == null || eta > 10))
             {
                 return StepOutcome.Wait;
             }
-            return StepOutcome.Done(arrived ? "部队已经到达" : $"部队离抵达还有 {eta:F0} 游戏秒");
+            return StepOutcome.Done((arrived ? "部队已经到达" : $"部队离抵达还有 {eta:F0} 游戏秒") + "；" + RingWornText(c));
         }
+
+        /// <summary>屏障圈上 / 圈里掉了耐久还立着的屏障 / 闸门（诊断：圈上有残血墙，攻城单位一到就打穿，圈外的合成台就不再是开路场的目标）。</summary>
+        private static string RingWornText(JourneyContext c)
+        {
+            List<BuildingRecord> worn = St.BuildingRecords.Where(b => b != null && b.RegionId == HomeValleyLayout.RegionId && DefenseCatalog.IsDraggable(b.BuildingTypeId) && OnOrInsideRing(c, b) && BuildingOps.IsWorn(b)).ToList();
+            return worn.Count == 0 ? "圈上屏障 / 闸门都是满耐久"
+                : $"圈上受损 {worn.Count} 段：" + string.Join("、", worn.Select(b => $"{D.Cell(new GridCell(b.GridX, b.GridY))} {BuildingOps.Durability(b):F0}/{BuildingOps.MaxDurability(b.BuildingTypeId):F0}（维修件 {BuildingOps.RepairKitsFor(b)}）"));
+        }
+
+        /// <summary>诊断：每台突袭者的职能 / 模式 / 是否站定、耐久、位置，和它此刻的目标（类别位、位置）。</summary>
+        private static string RaiderDiag()
+        {
+            CombatSite site = D.HomeSite;
+            if (site == null)
+            {
+                return "（没有家园战斗）";
+            }
+            return string.Join("、", D.Raiders().Select(r =>
+            {
+                if (!site.Kernel.TryGetUnit(r.Id, out BinGames.Sim.Combat.CombatUnitView v))
+                {
+                    return "?";
+                }
+                string tgt = v.CommandTarget != 0 && site.Kernel.TryGetUnit(v.CommandTarget, out BinGames.Sim.Combat.CombatUnitView t)
+                    ? $"→cat{t.Siege.Cat}@({t.Position.x:F0},{t.Position.y:F0})" : "→无";
+                return $"r{v.Siege.Role}m{v.Siege.Mode}h{v.Siege.Hold} {v.Health:F0}hp ({v.Position.x:F0},{v.Position.y:F0}){tgt}{(v.Siege.Breach != 0 ? " 破墙" : string.Empty)}";
+            }));
+        }
+
+        /// <summary>
+        /// FG15-QA-01：展开后至少一台突袭者此刻的目标是合成台（内核结构单位：类别“其它”、位置 = 合成台）。规则见 <see cref="FgjM6Common.PlanSynthNear"/>（raiderNearest）。
+        /// 没被当成目标就被毁、或 20 秒内没有一台以它为目标 = 照实失败（带每台突袭者的职能 / 目标诊断）。
+        /// </summary>
+        private static StepOutcome TickSynthTargeted(JourneyContext c)
+        {
+            JourneyCommon.ResumeIfAutoPaused(c);
+            BuildingRecord b = P.Bld(c, "synth");
+            CombatSite site = D.HomeSite;
+            if (b == null || site == null)
+            {
+                return StepOutcome.Fail("电路合成台或家园战斗不见了");
+            }
+            var who = new List<string>();
+            foreach (var r in D.Raiders())
+            {
+                if (site.Kernel.TryGetUnit(r.Id, out BinGames.Sim.Combat.CombatUnitView v) && v.CommandTarget != 0
+                    && site.Kernel.TryGetUnit(v.CommandTarget, out BinGames.Sim.Combat.CombatUnitView t) && (t.Siege.Cat & 32) != 0
+                    && Mathf.Abs((float)t.Position.x - b.Position.x) < 0.75f && Mathf.Abs((float)t.Position.y - b.Position.y) < 0.75f)
+                {
+                    who.Add($"职能 {v.Siege.Role} 在 ({v.Position.x:F0},{v.Position.y:F0})");
+                }
+            }
+            if (who.Count > 0)
+            {
+                return StepOutcome.Done($"{who.Count} 台突袭者以合成台 {D.Cell(new GridCell(b.GridX, b.GridY))} 为目标：{string.Join("、", who)}；合成台耐久 {BuildingOps.Durability(b):F0}/{BuildingOps.MaxDurability(b.BuildingTypeId):F0}");
+            }
+            if (b.ConstructionState == BuildingConstructionState.Damaged || b.ConstructionState == BuildingConstructionState.Destroyed)
+            {
+                return StepOutcome.Fail("合成台没被任何突袭者当成目标就被毁了：" + RaiderDiag());
+            }
+            return c.StepElapsed < 20 ? StepOutcome.Wait : StepOutcome.Fail("展开 20 秒后没有一台突袭者以合成台为目标：" + RaiderDiag());
+        }
+
+        /// <summary>诊断：这一波结算的损失明细（类别:名字(ID)@来源）与进行中的结算。</summary>
+        private static string LossDiag(RaidResultRecord rr, BuildingRecord b) =>
+            $"合成台 {b.BuildingId}；本波结算 " + (rr == null ? "无" : $"#{rr.Serial}/{rr.PlanId}（结束步 {rr.EndTick}）损失明细 [{string.Join("、", rr.Losses.Select(x => $"{x.Kind}:{x.Name}({x.Id})@{x.Source}"))}]")
+            + $"；进行中的结算 [{string.Join("、", RaidResultService.All(St).Where(r => r != null && r.EndTick < 0).Select(r => $"#{r.Serial}/{r.PlanId}"))}]；第 {GameClock.Ticks} 步";
 
         private static int SubstrateTotal()
         {
@@ -2005,17 +2129,24 @@ namespace GameLogic.EditorTools.JourneyBots
                 {
                     return StepOutcome.Fail($"两项熔合都做完了合成台还没被拆（{BuildingOps.Durability(b):F0}/{BuildingOps.MaxDurability(b?.BuildingTypeId):F0}）：攻城单位没去打合成台；{D.ResultLine(RaidResultService.FindByPlan(s, c.Get("rs.plan")))}");
                 }
-                int tick = (int)(c.StepElapsed / 10);
+                int tick = (int)(c.StepElapsed / 5);
                 if (tick > c.GetInt(FgjM3Common.SK(c, "log")))
                 {
                     c.SetInt(FgjM3Common.SK(c, "log"), tick);
-                    c.Log($"合成台耐久 {BuildingOps.Durability(b):F0}/{BuildingOps.MaxDurability(b?.BuildingTypeId):F0}；熔合 [{string.Join("；", jobs.Select(FusionService.StateText))}]；在场敌人 {D.Raiders().Count}");
+                    c.Log($"合成台耐久 {BuildingOps.Durability(b):F0}/{BuildingOps.MaxDurability(b?.BuildingTypeId):F0}；熔合 [{string.Join("；", jobs.Select(FusionService.StateText))}]；在场敌人 {D.Raiders().Count}：{RaiderDiag()}");
                 }
                 return StepOutcome.Wait;
             }
-            if (c.StepElapsed < 1 || jobs.Any(j => j.State != FusionJobState.RolledBack && j.State != FusionJobState.Done))
+            // 8 秒宽限从“第一次看到合成台被毁”算起（回滚在熔合服务下一次推进时结算；原来从本步开始算，合成台 20 多秒后才被拆时第一眼就判失败）。
+            string dk = FgjM3Common.SK(c, "dAt");
+            if (c.GetLong(dk) == 0)
             {
-                return c.StepElapsed < 8 ? StepOutcome.Wait : StepOutcome.Fail($"合成台被毁后熔合没回滚：[{string.Join("；", jobs.Select(j => j.State + "/" + j.Reason))}]");
+                c.SetLong(dk, (long)(c.StepElapsed * 1000) + 1);
+            }
+            double sinceDestroyed = c.StepElapsed - c.GetLong(dk) / 1000.0;
+            if (sinceDestroyed < 1 || jobs.Any(j => j.State != FusionJobState.RolledBack && j.State != FusionJobState.Done))
+            {
+                return sinceDestroyed < 8 ? StepOutcome.Wait : StepOutcome.Fail($"合成台被毁后熔合没回滚：[{string.Join("；", jobs.Select(j => j.State + "/" + j.Reason))}]");
             }
             List<FusionJobRecord> rolled = jobs.Where(j => j.State == FusionJobState.RolledBack).ToList();
             List<FusionJobRecord> done = jobs.Where(j => j.State == FusionJobState.Done).ToList();
@@ -2042,15 +2173,15 @@ namespace GameLogic.EditorTools.JourneyBots
             bool note = NotificationCenter.History.Skip(c.GetInt("fu.notes0")).Any(e => e.Type?.Id == "fusion_rolled_back");
             RaidResultRecord rr = RaidResultService.FindByPlan(s, c.Get("rs.plan"));
             bool loss = rr != null && rr.Losses.Any(x => x.Id == b.BuildingId);
-            if (!loss && c.StepElapsed < 20)
+            if (!loss && sinceDestroyed < 20)
             {
-                return StepOutcome.Wait; // 结算的损失表随攻城对账（siege.sync_seconds）写进来
+                return StepOutcome.Wait; // 结算的损失表随攻城对账（siege.sync_seconds）写进来；同样从第一次看到被毁算起（FG15-QA-01 整包第 3 次：被毁时本步已过 37 秒，第一眼就判“结算损失 False”）
             }
             return reasons && chips && subOk && techOk && note && loss
                 ? StepOutcome.Done($"突袭部队拆掉了正在熔合的合成台（{b.ConstructionState}）：回滚 {rolled.Count} 项（{string.Join("、", rolled.Select(j => FusionService.StateText(j)))}，原因“被毁”）、完成 {done.Count} 项；" +
                                    $"父固件预留释放（过载 {M.ChipCount(FirmwareCatalog.FwOverloadId)}、液氮 {M.ChipCount(FwPartner)} 枚）；芯片基板总量 {c.GetInt("fu.sub0")} → {sub}、熔合的技术数据支出 {c.GetLong("fu.exp0")} → {exp}（回滚的全额退回{(done.Count > 0 ? $"，做完的 {done.Count} 项照常消耗芯片基板 {doneSub}、技术数据 {doneTech}" : string.Empty)}）；" +
                                    $"通知“熔合中止”；突袭结算记下合成台这处损失（{D.ResultLine(rr)}）")
-                : StepOutcome.Fail($"回滚不完整：原因 {reasons}、固件 {chips}、芯片基板 {subOk}（{c.GetInt("fu.sub0")} → {sub}）、技术数据 {techOk}（{c.GetLong("fu.exp0")} → {exp}）、通知 {note}、结算损失 {loss}；[{string.Join("；", jobs.Select(j => j.State + "/" + j.Reason))}]");
+                : StepOutcome.Fail($"回滚不完整：原因 {reasons}、固件 {chips}、芯片基板 {subOk}（{c.GetInt("fu.sub0")} → {sub}）、技术数据 {techOk}（{c.GetLong("fu.exp0")} → {exp}）、通知 {note}、结算损失 {loss}；[{string.Join("；", jobs.Select(j => j.State + "/" + j.Reason))}]；{LossDiag(rr, b)}");
         }
 
         // ── 断链：圈里两座炮塔在不在开火 ─────────────────────────────────────────────────────────────

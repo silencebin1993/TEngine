@@ -128,6 +128,11 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return;
             }
+            // DEBT-FG9E2E01-03：图鉴换到本次临时目录，且不按本机设置里见过的引导钩子补解锁——影子工程跑过别的旅程后“铸造主核心”也从“未解锁”开始，遭遇前锁着才断言得了。
+            // 局中只换文件并重载（MechanicCodex.Reload），不调 ResetForTests：后者会清掉图鉴面板订阅的打开事件，之后按图鉴键打不开（第 1 次实跑 codex_open 失败的根因）。
+            MechanicCodex.FilePathOverrideForTests = System.IO.Path.Combine(c.Get("saves"), "codex_mechanics_m9.json");
+            MechanicCodex.SkipSeenHookBackfillForTests = true;
+            MechanicCodex.Reload();
             FoundryOutpostRegion.EnsureRegionRecordSeeded(s);
             RegionRecord fo = FoundryOutpostRegion.Find(s);
             if (fo != null && fo.State == RegionState.Locked)
@@ -195,8 +200,12 @@ namespace GameLogic.EditorTools.JourneyBots
             FoundryOutpostRegion.CoreGateLights lights = FoundryOutpostRegion.ComputeCoreGateLights(s);
             ExpeditionDepartureService.RosterValidation v = ExpeditionDepartureService.ValidateRoster(s, team);
             bool reachable = ExpeditionDepartureService.ReachableTargets(s).Contains(ExpeditionDepartureService.ExpeditionTarget.FoundryOutpost);
-            // 只记录不断言：图鉴解锁会按本机设置里“见过的引导钩子”补解锁（GameSettings 不随旅程隔离，影子工程跑过别的旅程就会是已解锁）；“遭遇前锁着”由 FgCodexSelfCheck 覆盖。
+            // DEBT-FG9E2E01-03：夹具已隔离图鉴（临时文件 + 不按本机见过的引导钩子补解锁），遭遇前“铸造主核心”必须锁着
             c.SetInt("codexBossBefore", MechanicCodex.IsUnlocked(CodexBoss) ? 1 : 0);
+            if (c.GetInt("codexBossBefore") != 0)
+            {
+                return StepOutcome.Fail($"遭遇铸造主核心之前图鉴条目“铸造主核心”已解锁（隔离 {MechanicCodex.FilePath}、跳过钩子补解锁 {MechanicCodex.SkipSeenHookBackfillForTests}）");
+            }
             string counter = FoundryCounterService.PeekLocked(s);
             if (!lights.AllReady || !v.Success || !v.HasWeapon || !reachable || counter != AdaptationCatalog.JammerSupport)
             {

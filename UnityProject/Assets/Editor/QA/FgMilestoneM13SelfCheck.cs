@@ -215,47 +215,50 @@ namespace GameLogic.EditorTools
 
         // ── R. IC-REQ-022 反向场景 ─────────────────────────────────────────────────
 
+        private const string mega = "FgMegastructureSelfCheck.cs", reveal = "FgMegastructureSelfCheck.Reveal.cs", ending = "FgMegastructureSelfCheck.Ending.cs";
+
+        internal static readonly (string Category, string Segment, string File, string Label)[] ReverseMap =
+        {
+            ("R1 条件不足：没有巨构蓝图时返航工地放置被拦、写明蓝图来源", "FgMegastructureSelfCheck", mega, "B1 有巨构蓝图才能开工"),
+            ("R1 条件不足：构件源与冷却液同时断 → 进度停在原处不倒退、写缺料，恢复后接着走", "FgMegastructureSelfCheck", mega, "N4 负向“物资供给中断”"),
+            ("R1 条件不足：真实电网供不上 500 → 工地没电、供电计时不动", "FgMegastructureSelfCheck", mega, "N5 持续供电：真实电网供不上 500 时工地没电"),
+            ("R1 条件不足：玩家只有 1 台机器 → 根权限空转", "FgFlagshipSelfCheck", "FgFlagshipSelfCheck.cs", "F1 负向：玩家只有 1 台机器"),
+            ("R2 目标死亡：工地被摧毁 → 三项停在原处、面板写被摧毁", "FgMegastructureSelfCheck", mega, "N2 负向“工地被摧毁”"),
+            ("R2 目标死亡：清洗中家园核心被摧毁 → 存档被拒、清洗不再推进、失败页写明", "FgPurgeWaveSelfCheck", "FgPurgeWaveSelfCheck.cs", "C1 负向：第 2 波来袭时核心被摧毁"),
+            ("R2 目标死亡：倒计时中摧毁轨道打击信标 → 打击取消、圈内机器不掉血", "FgFleetFactionSelfCheck", "FgFleetFactionSelfCheck.cs", "D2 负向：倒计时第 5 秒摧毁信标"),
+            ("R2 目标死亡：登陆信标被毁 → 通知、掉废料、焦土恢复", "FgBeachheadSelfCheck", "FgBeachheadSelfCheck.cs", "F1 登陆信标被毁"),
+            ("R2 目标死亡：被夺取的机器被击倒 → 瘫痪不阵亡", "FgFlagshipSelfCheck", "FgFlagshipSelfCheck.cs", "D3 被夺取的机器被击倒后瘫痪"),
+            ("R2 目标死亡：阶段二 / 三竞技场里可用机器全灭 → 从该阶段开始重试", "FgFlagshipSelfCheck", "FgFlagshipSelfCheck.cs", "G2 负向：阶段三中可用机器全灭"),
+            ("R2 目标死亡：没击退旗舰不投放结局 / 不开结算 / 按钮无效", "FgEndingSelfCheck", ending, "E5 负向：没击退不投放"),
+            ("R3 失联：被夺取的机器在信号覆盖外按接入键被拒，回覆盖内夺回", "FgFlagshipSelfCheck", "FgFlagshipSelfCheck.cs", "D4 反向接入（正式入口 SignalUplinkService.Request）：覆盖外被拒"),
+            ("R3 失联：屏蔽塔范围内拒绝接入并写明原因、已接入的不被踢出", "FgFleetFactionSelfCheck", "FgFleetFactionSelfCheck.cs", "E1 屏蔽塔（FG09 第 8 章"),
+            ("R3 失联：家园不被观察时滩头着陆、投送与舱落地结果与观察时一致", "FgBeachheadSelfCheck", "FgBeachheadSelfCheck.cs", "K1 家园不被观察时滩头着陆"),
+            ("R3 失联：家园观察 / 不观察时信标点火 → 待点亮一致", "FgRevealSelfCheck", reveal, "R6 家园观察 / 不观察一致"),
+            ("R4 暂停与倍速：返航工程", "FgMegastructureSelfCheck", mega, "T1 暂停与 0.5x～3x"),
+            ("R4 暂停与倍速：揭示演出（真实秒、与倍速无关）", "FgRevealSelfCheck", reveal, "R5 暂停与倍速："),
+            ("R4 暂停与倍速：轨道打击", "FgFleetFactionSelfCheck", "FgFleetFactionSelfCheck.cs", "K1 暂停 6 秒轨道打击不落"),
+            ("R4 暂停与倍速：清洗波次", "FgPurgeWaveSelfCheck", "FgPurgeWaveSelfCheck.cs", "E1 清洗波次按游戏时间："),
+            ("R4 暂停与倍速：滩头持续投送", "FgBeachheadSelfCheck", "FgBeachheadSelfCheck.cs", "J1 持续投送按游戏时间："),
+            ("R4 暂停与倍速：根权限夺取间隔", "FgFlagshipSelfCheck", "FgFlagshipSelfCheck.cs", "J1 根权限夺取间隔按游戏时间："),
+            ("R4 暂停与倍速：结算期间", "FgEndingSelfCheck", ending, "E6 暂停与倍速矩阵"),
+            ("R5 存读档：返航工程推进中", "FgMegastructureSelfCheck", mega, "S1 推进中真文件存读档"),
+            ("R5 存读档：揭示演出中退出游戏 → 读回演出前自动存档重新播放", "FgRevealSelfCheck", reveal, "R2 负向“揭示演出中退出游戏”"),
+            ("R5 存读档：清洗第 1 波已发动、轨道打击倒计时中", "FgPurgeWaveSelfCheck", "FgPurgeWaveSelfCheck.cs", "F1 存读档：存档时第 1 波已发动"),
+            ("R5 存读档：核心被毁后读最近自动存档回到第 2 波开始前", "FgPurgeWaveSelfCheck", "FgPurgeWaveSelfCheck.cs", "C2 读取最近自动存档：回到第 2 波开始前"),
+            ("R5 存读档：滩头已投送 1 舱、登陆信标已毁", "FgBeachheadSelfCheck", "FgBeachheadSelfCheck.cs", "I1 存读档：存档时已投送 1 舱"),
+            ("R5 存读档：旗舰阶段三已夺取 1 台", "FgFlagshipSelfCheck", "FgFlagshipSelfCheck.cs", "I1 存读档：阶段三已夺取 1 台时存档"),
+            ("R5 存读档：结局演出中退出 / 结算返回主菜单 / 读回结局存档", "FgEndingSelfCheck", ending, "E3 中途退出与读档"),
+            ("R6 路径 / 地点失败：滩头锚点在多个种子下落在预留区里、可走格上（不在悬崖 / 水面）", "FgBeachheadSelfCheck", "FgBeachheadSelfCheck.cs", "在悬崖 / 水面上"),
+            ("R6 路径 / 地点失败：旗舰点位在多个种子下落在竞技场里、可走格上", "FgFlagshipSelfCheck", "FgFlagshipSelfCheck.cs", "在悬崖 / 水面上"),
+            ("R6 路径 / 地点失败：家园只剩核心时轨道打击落在核心外（不直接轰核心）", "FgPurgeWaveSelfCheck", "FgPurgeWaveSelfCheck.cs", "家园只剩核心时落在核心外"),
+            ("R6 路径 / 地点失败：建筑都只是规划虚影时打击不锁定它们", "FgPurgeWaveSelfCheck", "FgPurgeWaveSelfCheck.cs", "D4 负向：建筑都只是规划虚影时不锁定它们"),
+        };
+
         private static void CheckReverseScenarios()
         {
             Line("  · R. IC-REQ-022 六类反向（终局段）：每类至少一条起真实系统的断言仍在源码里、所在段登记在全量自检；R5 六段各一条真文件存读档；里程碑风险“根权限可能夺取玩家所在的机器”；FGT-END-001～008 映射");
             var segments = new HashSet<string>(CellFrameworkValidate.SegmentNames, StringComparer.Ordinal);
-            const string mega = "FgMegastructureSelfCheck.cs", reveal = "FgMegastructureSelfCheck.Reveal.cs", ending = "FgMegastructureSelfCheck.Ending.cs";
-            var map = new (string Category, string Segment, string File, string Label)[]
-            {
-                ("R1 条件不足：没有巨构蓝图时返航工地放置被拦、写明蓝图来源", "FgMegastructureSelfCheck", mega, "B1 有巨构蓝图才能开工"),
-                ("R1 条件不足：构件源与冷却液同时断 → 进度停在原处不倒退、写缺料，恢复后接着走", "FgMegastructureSelfCheck", mega, "N4 负向“物资供给中断”"),
-                ("R1 条件不足：真实电网供不上 500 → 工地没电、供电计时不动", "FgMegastructureSelfCheck", mega, "N5 持续供电：真实电网供不上 500 时工地没电"),
-                ("R1 条件不足：玩家只有 1 台机器 → 根权限空转", "FgFlagshipSelfCheck", "FgFlagshipSelfCheck.cs", "F1 负向：玩家只有 1 台机器"),
-                ("R2 目标死亡：工地被摧毁 → 三项停在原处、面板写被摧毁", "FgMegastructureSelfCheck", mega, "N2 负向“工地被摧毁”"),
-                ("R2 目标死亡：清洗中家园核心被摧毁 → 存档被拒、清洗不再推进、失败页写明", "FgPurgeWaveSelfCheck", "FgPurgeWaveSelfCheck.cs", "C1 负向：第 2 波来袭时核心被摧毁"),
-                ("R2 目标死亡：倒计时中摧毁轨道打击信标 → 打击取消、圈内机器不掉血", "FgFleetFactionSelfCheck", "FgFleetFactionSelfCheck.cs", "D2 负向：倒计时第 5 秒摧毁信标"),
-                ("R2 目标死亡：登陆信标被毁 → 通知、掉废料、焦土恢复", "FgBeachheadSelfCheck", "FgBeachheadSelfCheck.cs", "F1 登陆信标被毁"),
-                ("R2 目标死亡：被夺取的机器被击倒 → 瘫痪不阵亡", "FgFlagshipSelfCheck", "FgFlagshipSelfCheck.cs", "D3 被夺取的机器被击倒后瘫痪"),
-                ("R2 目标死亡：阶段二 / 三竞技场里可用机器全灭 → 从该阶段开始重试", "FgFlagshipSelfCheck", "FgFlagshipSelfCheck.cs", "G2 负向：阶段三中可用机器全灭"),
-                ("R2 目标死亡：没击退旗舰不投放结局 / 不开结算 / 按钮无效", "FgEndingSelfCheck", ending, "E5 负向：没击退不投放"),
-                ("R3 失联：被夺取的机器在信号覆盖外按接入键被拒，回覆盖内夺回", "FgFlagshipSelfCheck", "FgFlagshipSelfCheck.cs", "D4 反向接入（正式入口 SignalUplinkService.Request）：覆盖外被拒"),
-                ("R3 失联：屏蔽塔范围内拒绝接入并写明原因、已接入的不被踢出", "FgFleetFactionSelfCheck", "FgFleetFactionSelfCheck.cs", "E1 屏蔽塔（FG09 第 8 章"),
-                ("R3 失联：家园不被观察时滩头着陆、投送与舱落地结果与观察时一致", "FgBeachheadSelfCheck", "FgBeachheadSelfCheck.cs", "K1 家园不被观察时滩头着陆"),
-                ("R3 失联：家园观察 / 不观察时信标点火 → 待点亮一致", "FgRevealSelfCheck", reveal, "R6 家园观察 / 不观察一致"),
-                ("R4 暂停与倍速：返航工程", "FgMegastructureSelfCheck", mega, "T1 暂停与 0.5x～3x"),
-                ("R4 暂停与倍速：揭示演出（真实秒、与倍速无关）", "FgRevealSelfCheck", reveal, "R5 暂停与倍速："),
-                ("R4 暂停与倍速：轨道打击", "FgFleetFactionSelfCheck", "FgFleetFactionSelfCheck.cs", "K1 暂停 6 秒轨道打击不落"),
-                ("R4 暂停与倍速：清洗波次", "FgPurgeWaveSelfCheck", "FgPurgeWaveSelfCheck.cs", "E1 清洗波次按游戏时间："),
-                ("R4 暂停与倍速：滩头持续投送", "FgBeachheadSelfCheck", "FgBeachheadSelfCheck.cs", "J1 持续投送按游戏时间："),
-                ("R4 暂停与倍速：根权限夺取间隔", "FgFlagshipSelfCheck", "FgFlagshipSelfCheck.cs", "J1 根权限夺取间隔按游戏时间："),
-                ("R4 暂停与倍速：结算期间", "FgEndingSelfCheck", ending, "E6 暂停与倍速矩阵"),
-                ("R5 存读档：返航工程推进中", "FgMegastructureSelfCheck", mega, "S1 推进中真文件存读档"),
-                ("R5 存读档：揭示演出中退出游戏 → 读回演出前自动存档重新播放", "FgRevealSelfCheck", reveal, "R2 负向“揭示演出中退出游戏”"),
-                ("R5 存读档：清洗第 1 波已发动、轨道打击倒计时中", "FgPurgeWaveSelfCheck", "FgPurgeWaveSelfCheck.cs", "F1 存读档：存档时第 1 波已发动"),
-                ("R5 存读档：核心被毁后读最近自动存档回到第 2 波开始前", "FgPurgeWaveSelfCheck", "FgPurgeWaveSelfCheck.cs", "C2 读取最近自动存档：回到第 2 波开始前"),
-                ("R5 存读档：滩头已投送 1 舱、登陆信标已毁", "FgBeachheadSelfCheck", "FgBeachheadSelfCheck.cs", "I1 存读档：存档时已投送 1 舱"),
-                ("R5 存读档：旗舰阶段三已夺取 1 台", "FgFlagshipSelfCheck", "FgFlagshipSelfCheck.cs", "I1 存读档：阶段三已夺取 1 台时存档"),
-                ("R5 存读档：结局演出中退出 / 结算返回主菜单 / 读回结局存档", "FgEndingSelfCheck", ending, "E3 中途退出与读档"),
-                ("R6 路径 / 地点失败：滩头锚点在多个种子下落在预留区里、可走格上（不在悬崖 / 水面）", "FgBeachheadSelfCheck", "FgBeachheadSelfCheck.cs", "在悬崖 / 水面上"),
-                ("R6 路径 / 地点失败：旗舰点位在多个种子下落在竞技场里、可走格上", "FgFlagshipSelfCheck", "FgFlagshipSelfCheck.cs", "在悬崖 / 水面上"),
-                ("R6 路径 / 地点失败：家园只剩核心时轨道打击落在核心外（不直接轰核心）", "FgPurgeWaveSelfCheck", "FgPurgeWaveSelfCheck.cs", "家园只剩核心时落在核心外"),
-                ("R6 路径 / 地点失败：建筑都只是规划虚影时打击不锁定它们", "FgPurgeWaveSelfCheck", "FgPurgeWaveSelfCheck.cs", "D4 负向：建筑都只是规划虚影时不锁定它们"),
-            };
+            var map = ReverseMap;
             var bad = new List<string>();
             var cats = new HashSet<string>(StringComparer.Ordinal);
             foreach ((string category, string segment, string file, string label) in map)

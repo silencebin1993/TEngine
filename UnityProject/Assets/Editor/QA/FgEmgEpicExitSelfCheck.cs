@@ -93,7 +93,7 @@ namespace GameLogic.EditorTools
         }
 
         /// 断言原文必须落在某个 Expect( 调用的参数里（排除注释、小节标题），找不到就算映射失效
-        private static bool InExpectCall(string text, string label)
+        internal static bool InExpectCall(string text, string label)
         {
             for (int i = text.IndexOf(label, StringComparison.Ordinal); i >= 0; i = text.IndexOf(label, i + 1, StringComparison.Ordinal))
             {
@@ -106,48 +106,50 @@ namespace GameLogic.EditorTools
             return false;
         }
 
+        internal static readonly (int Stage, string What, string Segment, string File, string Label)[] ReverseMap =
+        {
+            // 阶段 1（EMG1-E2E-01 证据 5.4）
+            (1, "资源不足：刻印废料不足零扣款", "FgSignalCoreSelfCheck", "FgSignalCoreSelfCheck.cs", "废料不足“"),
+            (1, "目标死亡：寻的目标中途阵亡按剩余额度重选", "FgEmgGrammarSelfCheck", "FgEmgGrammarSelfCheck.cs", "目标中途阵亡：在剩余额度"),
+            (1, "断链：信号离开后已剥离的子机不重刷、不续命", "FgEmgFlashSelfCheck", "FgEmgFlashSelfCheck.cs", "负向：离开后回 AI 武器再开火"),
+            (1, "带宽截断：带宽已满时新程序截断（第三架 0 条只有基础攻击）", "FgEmgFlashSelfCheck", "FgEmgFlashSelfCheck.cs", "第三架执行程序 "),
+            (1, "暂停与倍速：同一段游戏时间 1x / 0.5x / 3x 结果一致", "FgEmgGrammarSelfCheck", "FgEmgGrammarSelfCheck.cs", "同一段 3 秒游戏时间：1x ["),
+            (1, "存读档：在飞修饰弹体中途存档续跑逐步一致", "FgEmgGrammarSelfCheck", "FgEmgGrammarSelfCheck.cs", "，续跑 120 步每步 StateHash 一致"),
+            (1, "路径失败：抛射落点不可达时在瞄准点落地终结", "FgEmgGrammarSelfCheck", "FgEmgGrammarSelfCheck.cs", "目标走开（落点不可达）时在瞄准点落地终结"),
+            // 阶段 2（完整映射在 FgEmg2ExitSelfCheck R；这里六类各取一条阶段 2 自己的行为断言）
+            (2, "资源不足 / 容量满：斑块容量满按软上限 / 总上限降级", "FgEmgMatterSelfCheck", "FgEmgMatterSelfCheck.cs", "容量 30（世界源保留 4）"),
+            (2, "目标死亡：洗礼塔场上全灭复位", "FgBaptismTowerSelfCheck", "FgBaptismTowerSelfCheck.cs", "F2 负向“全灭”"),
+            (2, "路径失败：固化胶块堵死唯一通路 → 警告可定位", "FgEmgPersistSelfCheck", "FgEmgPersistSelfCheck.cs", "L2 固化胶块堵死核心与仓库唯一通路"),
+            (2, "断链：桥接导线一端阵亡立即断开", "FgEmgReclaimSelfCheck", "FgEmgReclaimSelfCheck.cs", "一端（目标单位）阵亡"),
+            (2, "暂停与倍速：区域节拍 0.5x～3x 结果与哈希一致", "FgEmgMigrationSelfCheck", "FgEmgMigrationSelfCheck.cs", "J1 每帧 1 / 2 / 6 步（0.5x～3x 只改每帧步数）"),
+            (2, "存读档：没有留存字段的 v2 旧档读入", "FgEmgPersistSelfCheck", "FgEmgPersistSelfCheck.cs", "N4 v2 旧档"),
+            // 阶段 3（EMG3-E2E-01 证据 B2）
+            (3, "断网 / 失联：中继阵亡后立即停止转发", "FgEmgSquadSelfCheck", "FgEmgSquadSelfCheck.cs", "中继 B 阵亡后"),
+            (3, "资源不足：中继限流原因文本", "FgEmgSquadSelfCheck", "FgEmgSquadSelfCheck.cs", "、限流未转发"),
+            (3, "元程序上限：第 3 层不执行、预览写原因", "FgEmgStage3FirmwareSelfCheck", "FgEmgStage3FirmwareSelfCheck.cs", "预览原因 emg.compile.meta_exec_cap"),
+            (3, "目标死亡 / 宿主提前结束：在结束点放出", "FgEmgMetaSelfCheck", "FgEmgMetaSelfCheck.cs", "宿主命中后继续飞、到点前已结束"),
+            (3, "暂停与倍速：中继组 0.5x / 1x / 3x / 暂停哈希一致", "FgEmgSquadSelfCheck", "FgEmgSquadSelfCheck.cs", "0.5x / 1x / 3x / 暂停：哈希与计数一致"),
+            (3, "存读档：中继转发中途存读档续跑一致", "FgEmgSquadSelfCheck", "FgEmgSquadSelfCheck.cs", "；续跑逐步哈希一致"),
+            (3, "坏数据：测试底盘行混进正式快照被拒", "FgEmgReservedChassisSelfCheck", "FgEmgReservedChassisSelfCheck.cs", "正式数据的内核读带多足测试行的快照"),
+            // 阶段 4（EMG4-E2E-01 证据“负向矩阵”；FG19 第 16 节两条反向）
+            (4, "永久改变堵路：熔坑算阻路、堵路警告与固态斑块同一泛洪", "FgEmgTerrainSelfCheck", "FgEmgTerrainSelfCheck.cs", "H3 熔坑进长期留存物清单且算阻路"),
+            (4, "槽位封锁后程序按空槽重编", "FgEmgSeizeSelfCheck", "FgEmgSeizeSelfCheck.cs", "封锁 1 号槽：版本 +1（接入中的机器重编译）"),
+            (4, "资源不足：仓库满时重复部件拆成技术数据", "FgEmgLootHintSelfCheck", "FgEmgLootHintSelfCheck.cs", "C5 仓库满时拿到重复部件"),
+            (4, "目标死亡：劫持者阵亡 → 被劫持体立即自毁、只结算一次", "FgEmgHijackSelfCheck", "FgEmgHijackSelfCheck.cs", "劫持者阵亡 → 下一步被劫持单位立即自毁"),
+            (4, "断链 / 失联：反向接入 3 秒夺回", "FgEmgSeizeSelfCheck", "FgEmgSeizeSelfCheck.cs", "反向接入：引导 3 游戏秒后夺回"),
+            (4, "暂停与倍速：劫持按 30 游戏秒到期", "FgEmgHijackSelfCheck", "FgEmgHijackSelfCheck.cs", "暂停时剩余时间不动；0.5x～3x 倍速下都按 30 游戏秒到期"),
+            (4, "暂停与倍速：熔坑凝固按游戏时间", "FgEmgTerrainSelfCheck", "FgEmgTerrainSelfCheck.cs", "J1 暂停 120 帧熔融金属不凝、不成坑"),
+            (4, "存读档：熔坑中途存读档哈希一致", "FgEmgTerrainSelfCheck", "FgEmgTerrainSelfCheck.cs", "F1 中途存读档（1 个熔坑"),
+            (4, "存读档：劫持中途存读档", "FgEmgHijackSelfCheck", "FgEmgHijackSelfCheck.cs", "劫持中途存读档（格式"),
+            (4, "路径失败：熔坑不可进入，地面单位绕行", "FgEmgTerrainSelfCheck", "FgEmgTerrainSelfCheck.cs", "D2 地面单位穿过去：没有一步踏进坑里"),
+            (4, "精英 / 首领不可劫持（按抗性拒绝并写原因）", "FgEmgHijackSelfCheck", "FgEmgHijackSelfCheck.cs", "真实路径：hij.hack 命中精英"),
+        };
+
         private static void CheckReverseScenarios()
         {
             Line("  · R. 四阶段反向场景合集：每格 = 已登记段里起真实系统的一条断言（段名 + 断言原文）；本进程已跑过该段时再核本轮失败 0");
             var segments = new HashSet<string>(CellFrameworkValidate.SegmentNames, StringComparer.Ordinal);
-            var map = new (int Stage, string What, string Segment, string File, string Label)[]
-            {
-                // 阶段 1（EMG1-E2E-01 证据 5.4）
-                (1, "资源不足：刻印废料不足零扣款", "FgSignalCoreSelfCheck", "FgSignalCoreSelfCheck.cs", "废料不足“"),
-                (1, "目标死亡：寻的目标中途阵亡按剩余额度重选", "FgEmgGrammarSelfCheck", "FgEmgGrammarSelfCheck.cs", "目标中途阵亡：在剩余额度"),
-                (1, "断链：信号离开后已剥离的子机不重刷、不续命", "FgEmgFlashSelfCheck", "FgEmgFlashSelfCheck.cs", "负向：离开后回 AI 武器再开火"),
-                (1, "带宽截断：带宽已满时新程序截断（第三架 0 条只有基础攻击）", "FgEmgFlashSelfCheck", "FgEmgFlashSelfCheck.cs", "第三架执行程序 "),
-                (1, "暂停与倍速：同一段游戏时间 1x / 0.5x / 3x 结果一致", "FgEmgGrammarSelfCheck", "FgEmgGrammarSelfCheck.cs", "同一段 3 秒游戏时间：1x ["),
-                (1, "存读档：在飞修饰弹体中途存档续跑逐步一致", "FgEmgGrammarSelfCheck", "FgEmgGrammarSelfCheck.cs", "，续跑 120 步每步 StateHash 一致"),
-                (1, "路径失败：抛射落点不可达时在瞄准点落地终结", "FgEmgGrammarSelfCheck", "FgEmgGrammarSelfCheck.cs", "目标走开（落点不可达）时在瞄准点落地终结"),
-                // 阶段 2（完整映射在 FgEmg2ExitSelfCheck R；这里六类各取一条阶段 2 自己的行为断言）
-                (2, "资源不足 / 容量满：斑块容量满按软上限 / 总上限降级", "FgEmgMatterSelfCheck", "FgEmgMatterSelfCheck.cs", "容量 30（世界源保留 4）"),
-                (2, "目标死亡：洗礼塔场上全灭复位", "FgBaptismTowerSelfCheck", "FgBaptismTowerSelfCheck.cs", "F2 负向“全灭”"),
-                (2, "路径失败：固化胶块堵死唯一通路 → 警告可定位", "FgEmgPersistSelfCheck", "FgEmgPersistSelfCheck.cs", "L2 固化胶块堵死核心与仓库唯一通路"),
-                (2, "断链：桥接导线一端阵亡立即断开", "FgEmgReclaimSelfCheck", "FgEmgReclaimSelfCheck.cs", "一端（目标单位）阵亡"),
-                (2, "暂停与倍速：区域节拍 0.5x～3x 结果与哈希一致", "FgEmgMigrationSelfCheck", "FgEmgMigrationSelfCheck.cs", "J1 每帧 1 / 2 / 6 步（0.5x～3x 只改每帧步数）"),
-                (2, "存读档：没有留存字段的 v2 旧档读入", "FgEmgPersistSelfCheck", "FgEmgPersistSelfCheck.cs", "N4 v2 旧档"),
-                // 阶段 3（EMG3-E2E-01 证据 B2）
-                (3, "断网 / 失联：中继阵亡后立即停止转发", "FgEmgSquadSelfCheck", "FgEmgSquadSelfCheck.cs", "中继 B 阵亡后"),
-                (3, "资源不足：中继限流原因文本", "FgEmgSquadSelfCheck", "FgEmgSquadSelfCheck.cs", "、限流未转发"),
-                (3, "元程序上限：第 3 层不执行、预览写原因", "FgEmgStage3FirmwareSelfCheck", "FgEmgStage3FirmwareSelfCheck.cs", "预览原因 emg.compile.meta_exec_cap"),
-                (3, "目标死亡 / 宿主提前结束：在结束点放出", "FgEmgMetaSelfCheck", "FgEmgMetaSelfCheck.cs", "宿主命中后继续飞、到点前已结束"),
-                (3, "暂停与倍速：中继组 0.5x / 1x / 3x / 暂停哈希一致", "FgEmgSquadSelfCheck", "FgEmgSquadSelfCheck.cs", "0.5x / 1x / 3x / 暂停：哈希与计数一致"),
-                (3, "存读档：中继转发中途存读档续跑一致", "FgEmgSquadSelfCheck", "FgEmgSquadSelfCheck.cs", "；续跑逐步哈希一致"),
-                (3, "坏数据：测试底盘行混进正式快照被拒", "FgEmgReservedChassisSelfCheck", "FgEmgReservedChassisSelfCheck.cs", "正式数据的内核读带多足测试行的快照"),
-                // 阶段 4（EMG4-E2E-01 证据“负向矩阵”；FG19 第 16 节两条反向）
-                (4, "永久改变堵路：熔坑算阻路、堵路警告与固态斑块同一泛洪", "FgEmgTerrainSelfCheck", "FgEmgTerrainSelfCheck.cs", "H3 熔坑进长期留存物清单且算阻路"),
-                (4, "槽位封锁后程序按空槽重编", "FgEmgSeizeSelfCheck", "FgEmgSeizeSelfCheck.cs", "封锁 1 号槽：版本 +1（接入中的机器重编译）"),
-                (4, "资源不足：仓库满时重复部件拆成技术数据", "FgEmgLootHintSelfCheck", "FgEmgLootHintSelfCheck.cs", "C5 仓库满时拿到重复部件"),
-                (4, "目标死亡：劫持者阵亡 → 被劫持体立即自毁、只结算一次", "FgEmgHijackSelfCheck", "FgEmgHijackSelfCheck.cs", "劫持者阵亡 → 下一步被劫持单位立即自毁"),
-                (4, "断链 / 失联：反向接入 3 秒夺回", "FgEmgSeizeSelfCheck", "FgEmgSeizeSelfCheck.cs", "反向接入：引导 3 游戏秒后夺回"),
-                (4, "暂停与倍速：劫持按 30 游戏秒到期", "FgEmgHijackSelfCheck", "FgEmgHijackSelfCheck.cs", "暂停时剩余时间不动；0.5x～3x 倍速下都按 30 游戏秒到期"),
-                (4, "暂停与倍速：熔坑凝固按游戏时间", "FgEmgTerrainSelfCheck", "FgEmgTerrainSelfCheck.cs", "J1 暂停 120 帧熔融金属不凝、不成坑"),
-                (4, "存读档：熔坑中途存读档哈希一致", "FgEmgTerrainSelfCheck", "FgEmgTerrainSelfCheck.cs", "F1 中途存读档（1 个熔坑"),
-                (4, "存读档：劫持中途存读档", "FgEmgHijackSelfCheck", "FgEmgHijackSelfCheck.cs", "劫持中途存读档（格式"),
-                (4, "路径失败：熔坑不可进入，地面单位绕行", "FgEmgTerrainSelfCheck", "FgEmgTerrainSelfCheck.cs", "D2 地面单位穿过去：没有一步踏进坑里"),
-                (4, "精英 / 首领不可劫持（按抗性拒绝并写原因）", "FgEmgHijackSelfCheck", "FgEmgHijackSelfCheck.cs", "真实路径：hij.hack 命中精英"),
-            };
+            var map = ReverseMap;
             string qa = Path.Combine(Application.dataPath, "Editor/QA");
             var sources = new Dictionary<string, string>(StringComparer.Ordinal);
             int ranNow = 0;

@@ -102,6 +102,16 @@ namespace GameLogic.EditorTools
         private static List<string> Missing(JourneyDef d, IEnumerable<(string What, string[] Ids)> map) =>
             map.Where(x => d == null || x.Ids.Any(id => d.Steps.All(s => s.Id != id))).Select(x => x.What).ToList();
 
+        internal static readonly (string What, string[] Ids)[] ReverseSteps =
+        {
+            ("路径失败（缺关键材料等待、缺前置被拒 → 补上）", new[] { "r1_key", "r1_prereq", "r1_pre_q", "r1_t3_q", "r1_fixture", "r1_ok" }),
+            ("资源不足（正式熔合缺芯片基板 → 补上）", new[] { "r2_short", "r2_fixture", "r2_formal" }),
+            ("目标死亡（熔合中合成台被毁 → 回滚 → 重建再熔合）", new[] { "r3_destroy", "r3_panel", "r3_rebuild", "r3_built", "r3_formal", "r3_done" }),
+            ("断链（断电研究暂停 → 来电恢复）", new[] { "r4_off1", "r4_stalled", "r4_on1", "r4_back" }),
+            ("暂停与倍速、移出队列进度保留", new[] { "r5_pause", "r5_frozen", "r5_half", "r5_triple", "r5_remove", "r5_requeue", "r5_continue" }),
+            ("存读档", new[] { "r6_quit", "r6_menu", "r6_load", "r6_loaded" }),
+        };
+
         private static void CheckJourneyCatalog()
         {
             Line("  · A. 旅程登记：FGJ-M5 覆盖出口旅程原文七步与回补；FGJ-M5R 覆盖 IC-REQ-022 六类；种子不同；两条都登记断点");
@@ -127,15 +137,7 @@ namespace GameLogic.EditorTools
             List<string> missing = Missing(m5, exit);
             Expect(Wellformed(m5) && missing.Count == 0 && m5.Seed == FgjM5Journey.TestSeed,
                 $"FGJ-M5：{m5?.Steps.Count} 步、步骤 ID 不重复、每步有超时与检查、固定种子 {m5?.Seed}；出口旅程七步与回补都有对应步骤{(missing.Count == 0 ? string.Empty : "，缺：" + string.Join("、", missing))}");
-            var reverse = new (string What, string[] Ids)[]
-            {
-                ("路径失败（缺关键材料等待、缺前置被拒 → 补上）", new[] { "r1_key", "r1_prereq", "r1_pre_q", "r1_t3_q", "r1_fixture", "r1_ok" }),
-                ("资源不足（正式熔合缺芯片基板 → 补上）", new[] { "r2_short", "r2_fixture", "r2_formal" }),
-                ("目标死亡（熔合中合成台被毁 → 回滚 → 重建再熔合）", new[] { "r3_destroy", "r3_panel", "r3_rebuild", "r3_built", "r3_formal", "r3_done" }),
-                ("断链（断电研究暂停 → 来电恢复）", new[] { "r4_off1", "r4_stalled", "r4_on1", "r4_back" }),
-                ("暂停与倍速、移出队列进度保留", new[] { "r5_pause", "r5_frozen", "r5_half", "r5_triple", "r5_remove", "r5_requeue", "r5_continue" }),
-                ("存读档", new[] { "r6_quit", "r6_menu", "r6_load", "r6_loaded" }),
-            };
+            var reverse = ReverseSteps;
             List<string> missingR = Missing(m5r, reverse);
             Expect(Wellformed(m5r) && missingR.Count == 0 && m5r.Seed != m5.Seed,
                 $"FGJ-M5R：{m5r?.Steps.Count} 步；六类反向场景齐全{(missingR.Count == 0 ? string.Empty : "，缺：" + string.Join("、", missingR))}；种子 {m5r?.Seed} ≠ {m5?.Seed}（B25）");

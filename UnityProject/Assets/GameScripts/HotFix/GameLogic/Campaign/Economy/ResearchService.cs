@@ -1238,6 +1238,9 @@ namespace GameLogic.Campaign.Economy
         private static readonly string[] PostTreeUnlocks = { "build:" + Env.RoofService.ToolId, "build:pipe_t3", "tier:listening_post.t2",
             "tier:purifier.t2", "tier:purifier.t3", // FG7-ENV-04：净化塔 T2 / T3
             "comp:comp_heat_repeater", "comp:struct_fin_crown", // FG11-FAC-01
+            // FG15-QA-01（回归包查出，FG15-BAL-01 开放阵营节点时只改了表生成的 POST_TREE_NODES）：静默 / 铸造 / 澄净的标志组件与结构模块、澄净专属炮塔组件
+            // 也是研发树开放之后才落地的内容——不计入开局技术数据换算，旧档迁移也不白送。
+            "comp:comp_jammer", "comp:struct_stealth_cloak", "comp:comp_brace_mortar", "comp:struct_armor_skirt", "comp:comp_spray_arm", "comp:comp_ring_sprinkler",
             "build:" + Env.VibrationService.DamperTypeId }; // FG12-EVT-02：减震基座（与表生成的 POST_TREE_NODES environment.damper 同一口径）；FG11-FAC-01：超频标志组件 / 模块蓝图（与表生成的 POST_TREE_NODES overclock.component / module 同一口径）
 
         // ── FG5-E2E-01：新档的技术数据供给（DEBT-FG5RND01-08）与研发加成的数值来源行（DEBT-FG5RND01-07）──────────────

@@ -27,6 +27,9 @@ namespace GameLogic.UI.Kit
         public static NarrativeCutscenePlayerUIToolkit Instance { get; private set; }
         public static bool IsShowing => Instance != null && Instance._cutscene != null;
 
+        /// <summary>FG15-QA-01：诊断用——播放器已载入界面（没载入时每帧直接返回，待播演出不会开始）。</summary>
+        public static bool RootLoaded => Instance != null && Instance._root != null;
+
         /// <summary>自检：编辑模式下没有载入的地点也允许自动开始 / 不自动中止。</summary>
         public static bool InWorldOverrideForTests;
 

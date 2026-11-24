@@ -41,7 +41,7 @@ namespace GameLogic.EditorTools
     ///
     /// A. 旅程登记：FGJ-M6 覆盖出口旅程原文（第一座炮塔挡住第一次 1 级突袭、漏油带 + 燃迹炮塔火墙、出发远征、远征中家园遇袭两种选择、离家报告突袭时间线、自动重建），
     ///    三波突袭全是正式触发、旅程里没有突袭夹具；FGJ-M6R 覆盖 IC-REQ-022 六类（每类出错 → 恢复）并点名 FG6-DEF-08 移交的两条承接旅程（熔合回滚、黑匣子 → 研究）；种子不同；都登记断点。
-    /// A2. 旅程源码只走输入通道：不直接调防御 / 突袭 / 接入 / 规则 / 面板等业务方法；FGJ-M6R 的三处进度夹具（研究、剧情突袭、芯片基板）只在登记的夹具方法里，FGJ-M6 一处都没有。
+    /// A2. 旅程源码只走输入通道：不直接调防御 / 突袭 / 接入 / 规则 / 面板等业务方法；FGJ-M6R 的进度夹具（剧情突袭、芯片基板、维修件、受害机器耐久；研究已改实验室真实研究）只在登记的夹具方法里，FGJ-M6 一处都没有。
     /// B. B25：FGJ-M6 的家园防线规划（回收站、实验室、精炼链、六座炮塔、护盾、屏障圈）在 5 个种子上都找得到、逐件过放置校验（只差研究的算过）、互不重叠；
     ///    防线放下之后，火墙按 4 个方向的抵达点都规划得出（改装离抵达点最近的炮塔 + 陷阱发射器 + 经缺口的燃油管线）；FGJ-M6R 的完全围死规划在 2 个种子上找得到。
     /// B2. 防线规划守得住（FGT-DEF-001 / 003 / 005 合场，真实突袭导演 + 真实攻城 + 真实炮塔）：种子 42 与 1 上按 FGJ-M6 的规划布防、按旅程的广播开关节奏（四次：第三波排定后不再关，它在预警前并成 2 级），
@@ -131,6 +131,18 @@ namespace GameLogic.EditorTools
         private static List<string> Missing(JourneyDef d, IEnumerable<(string What, string[] Ids)> map) =>
             map.Where(x => d == null || x.Ids.Any(id => d.Steps.All(s => s.Id != id))).Select(x => x.What).ToList();
 
+        internal static readonly (string What, string[] Ids)[] ReverseSteps =
+        {
+            ("资源不足（陷阱缺水 → 补上管线）", new[] { "r1_fw", "r1_short", "r1_fix", "r1_flow" }),
+            ("路径失败（屏障圈没留闸门 → 放置预览警告机器到不了 → 改放闸门 → 敌方被圈死、己方放行）", new[] { "walls", "pf_hover", "pf_gate", "pf_built" }),
+            ("暂停与倍速（攻城中）", new[] { "ra_siege", "ra_pause", "ra_frozen", "ra_resume", "ra_half", "ra_triple", "ra_wall" }),
+            ("存读档（攻城中）", new[] { "rb_siege", "rb_esc", "rb_quit", "rb_menu", "rb_load", "rb_loaded", "rb_end" }),
+            ("断链（目标死亡之后再请一波：攻城中按 0.5 倍速、敌人进射程、炮塔正在开火时禁用全部发电机 → 炮塔缺电、内核武器关、名下击毁与对敌伤害不再涨 → 逐台启用 → 来电、恢复开火）", new[] { "rp_gens", "rp_siege", "rp_half", "rp_engage", "rp_off0", "rp_nopower", "rp_on0", "rp_power" }),
+            ("目标死亡（接入的机器被打死、全灭应急打印）", new[] { "rc_send_a", "rc_charge", "rc_attack" }),
+            ("承接 DEBT-FG5E2E01-05：真实突袭打坏熔合中的合成台 → 回滚（复原 / 刻印父固件、合成台放在抵达点旁、正式熔合入队、攻城单位拆掉、回滚守恒、结算损失）", new[] { "fu_ana_ok", "fu_print_n2", "fu_plan", "fu_built", "fu_sim", "rs_ring", "fu_formal", "fu_formal2", "rs_siege", "fu_target", "fu_rolled" }),
+            ("承接 DEBT-FG5RND06-03：真实突袭打死家园机器 → 黑匣子 → 陈列馆分析 → 研究（第三波打死接入的机器、陈列馆与实验室、研究排队、分析完入账、研究点）", new[] { "rc_charge", "bb_built", "bb_rt_q", "bb_done" }),
+        };
+
         private static void CheckJourneyCatalog()
         {
             Line("  · A. 旅程登记：FGJ-M6 覆盖出口旅程原文；FGJ-M6R 覆盖 IC-REQ-022 六类与 FG6-DEF-08 移交的两条承接旅程（熔合回滚、黑匣子 → 研究）；种子不同；两条都登记断点");
@@ -153,17 +165,7 @@ namespace GameLogic.EditorTools
             List<string> missing = Missing(m6, exit);
             Expect(Wellformed(m6) && missing.Count == 0 && m6.Seed == FgjM6Journey.TestSeed,
                 $"FGJ-M6：{m6?.Steps.Count} 步、步骤 ID 不重复、每步有超时与检查、固定种子 {m6?.Seed}；出口旅程原文与承接 / 回补都有对应步骤{(missing.Count == 0 ? string.Empty : "，缺：" + string.Join("、", missing))}");
-            var reverse = new (string What, string[] Ids)[]
-            {
-                ("资源不足（陷阱缺水 → 补上管线）", new[] { "r1_fw", "r1_short", "r1_fix", "r1_flow" }),
-                ("路径失败（屏障圈没留闸门 → 放置预览警告机器到不了 → 改放闸门 → 敌方被圈死、己方放行）", new[] { "walls", "pf_hover", "pf_gate", "pf_built" }),
-                ("暂停与倍速（攻城中）", new[] { "ra_siege", "ra_pause", "ra_frozen", "ra_resume", "ra_half", "ra_triple", "ra_wall" }),
-                ("存读档（攻城中）", new[] { "rb_siege", "rb_esc", "rb_quit", "rb_menu", "rb_load", "rb_loaded", "rb_end" }),
-                ("断链（目标死亡之后再请一波：攻城中按 0.5 倍速、敌人进射程、炮塔正在开火时禁用全部发电机 → 炮塔缺电、内核武器关、名下击毁与对敌伤害不再涨 → 逐台启用 → 来电、恢复开火）", new[] { "rp_gens", "rp_siege", "rp_half", "rp_engage", "rp_off0", "rp_nopower", "rp_on0", "rp_power" }),
-                ("目标死亡（接入的机器被打死、全灭应急打印）", new[] { "rc_send_a", "rc_charge", "rc_attack" }),
-                ("承接 DEBT-FG5E2E01-05：真实突袭打坏熔合中的合成台 → 回滚（复原 / 刻印父固件、合成台放在抵达点旁、正式熔合入队、攻城单位拆掉、回滚守恒、结算损失）", new[] { "fu_ana_ok", "fu_print_n2", "fu_plan", "fu_built", "fu_sim", "fu_formal", "fu_formal2", "rs_siege", "fu_rolled" }),
-                ("承接 DEBT-FG5RND06-03：真实突袭打死家园机器 → 黑匣子 → 陈列馆分析 → 研究（第三波打死接入的机器、陈列馆与实验室、研究排队、分析完入账、研究点）", new[] { "rc_charge", "bb_built", "bb_rt_q", "bb_done" }),
-            };
+            var reverse = ReverseSteps;
             List<string> missingR = Missing(m6r, reverse);
             Expect(Wellformed(m6r) && missingR.Count == 0 && m6r.Seed != m6.Seed,
                 $"FGJ-M6R：{m6r?.Steps.Count} 步；六类反向场景齐全{(missingR.Count == 0 ? string.Empty : "，缺：" + string.Join("、", missingR))}；种子 {m6r?.Seed} ≠ {m6?.Seed}（B25）");
@@ -203,16 +205,16 @@ namespace GameLogic.EditorTools
         /// </summary>
         private static readonly (string Token, string Method, int Count, string Debt)[] Fixtures =
         {
-            ("ResearchService.CompleteForTests(", "ApplyResearchFixture", 1, "FGJ-M6R 屏障 / 陷阱已研究 DEBT-FG6E2E01-02"),
             ("RaidDirectorService.RequestStoryRaid(", "ApplyRaidFixture", 1, "FGJ-M6R 剧情节点触发突袭 DEBT-FG6E2E01-03"),
             ("M.ApplySubstrateFixture(", "ApplySubstrateFixture", 1, "FGJ-M6R 芯片基板进仓库（与 FGJ-M5 同一个夹具）DEBT-FG5E2E01-02"),
             ("SilentNightService.PlanDayForTests(", "ApplySilentNightFixture", 1, "FGJ-M6 第一次静默夜改排到第 40 日（只改日期）DEBT-FG9ACT101-06 ①"),
-            ("HomeInventory.Add(", "ApplyRepairKitFixture", 1, "FGJ-M6R 修核心的维修件补足（FG-GAP-149）DEBT-FG10E2E01-05"),
+            ("HomeInventory.Add(", "ApplyRepairKitFixture", 1, "FGJ-M6R 修核心 / 圈上残血屏障的维修件补足（FG-GAP-149、FG15-QA-01 rs_ring）DEBT-FG10E2E01-05"),
+            ("Kernel.Damage(", "ApplyFrailFixture", 1, "FGJ-M6R 目标死亡段受害机器耐久降到 BAL-REC-024 之前的出厂值 100 DEBT-FG15QA01-03"),
         };
 
         private static void CheckJourneySourcesUseInput()
         {
-            Line("  · A2. M6 旅程源码只走输入通道，不直接调业务方法；FGJ-M6R 的三处进度夹具与 FGJ-M6 的静默夜日程夹具只在登记的方法里（重建验收兜底已删除，DEBT-FG9ACT101-05），FGJ-M6 没有突袭夹具");
+            Line("  · A2. M6 旅程源码只走输入通道，不直接调业务方法；FGJ-M6R 的进度夹具（没有研究夹具）与 FGJ-M6 的静默夜日程夹具只在登记的方法里（重建验收兜底已删除，DEBT-FG9ACT101-05），FGJ-M6 没有突袭夹具");
             var hits = new List<string>();
             var raw = new StringBuilder();
             var codeAll = new StringBuilder();
@@ -260,8 +262,10 @@ namespace GameLogic.EditorTools
                 }
             }
             bool m6Clean = !m6Code.Contains("RequestStoryRaid(") && !m6Code.Contains("CompleteForTests(") && !m6Code.Contains("SkipForTests(") && !m6Code.Contains("Dispatch(");
-            Expect(bad.Count == 0 && m6Clean,
-                $"夹具只在登记的方法里（{string.Join("；", seen)}）；FGJ-M6 没有任何突袭 / 研究 / 跳时夹具（三波都是正式触发）：{m6Clean}{(bad.Count == 0 ? string.Empty : "；问题：" + string.Join("；", bad))}");
+            // FG15-QA-01 修复第 2 轮（DEBT-FG6E2E01-02 关闭）：FGJ-M6R 也不再有研究夹具——屏障 / 陷阱由圈里的仿真实验室真实研究（rt_q → rt_wait）。
+            bool m6rResearch = !all.Contains("CompleteForTests(") && all.Contains("D.TickQueueAll(c, new[] { D.NodeBarrier, D.NodeTrap })") && all.Contains("D.TickResearched(c, D.NodeBarrier, D.NodeTrap)");
+            Expect(bad.Count == 0 && m6Clean && m6rResearch,
+                $"夹具只在登记的方法里（{string.Join("；", seen)}）；FGJ-M6 没有任何突袭 / 研究 / 跳时夹具（三波都是正式触发）：{m6Clean}；FGJ-M6R 没有研究夹具、屏障 / 陷阱走研发树排队 + 实验室研究：{m6rResearch}{(bad.Count == 0 ? string.Empty : "；问题：" + string.Join("；", bad))}");
             string src = raw.ToString();
             string[] inputs =
             {

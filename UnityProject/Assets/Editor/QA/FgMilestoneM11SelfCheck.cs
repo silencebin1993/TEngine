@@ -218,39 +218,41 @@ namespace GameLogic.EditorTools
 
         // ── R. IC-REQ-022 反向场景 ─────────────────────────────────────────────────
 
+        internal static readonly (string Category, string Segment, string File, string Label)[] ReverseMap =
+        {
+            ("R1 条件不足：40 米外发动核心固件 → 镜像体不复制", "FgOverclockFactionSelfCheck", "FgOverclockFactionSelfCheck.cs", "F1 FGR-EMG-164：40 米外发动核心固件不复制"),
+            ("R1 条件不足：第一幕超频领地还没出现 → 贡献全是超频也不由超频发动突袭", "FgOverclockRaidSelfCheck", "FgOverclockRaidSelfCheck.cs", "B2 负向：第一幕超频领地还没出现"),
+            ("R1 条件不足：没有防腐涂层时 2 级污染上建中继被拦并写明涂层；3 级照旧被拦并写明出路", "FgHeatDataCitySelfCheck", "FgHeatDataCitySelfCheck.cs", "D1 FG-GAP-164（第 3 项"),
+            ("R1 条件不足：只有一支 / 没有远征在外时“切换远征队”被拒", "FgMultiExpeditionSelfCheck", "FgExpeditionMarchSelfCheck.cs", "X1 两支分头出发（FG-GAP-016）"),
+            ("R2 目标死亡：余烬主机战场上机器全灭 → 数据中心卸载、首领复位、可重试", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "E1 负向“全灭重试”"),
+            ("R2 目标死亡：熔毁倒计时中击毁余烬主机 → 不再熔毁、没有残留封锁", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "D1 负向：倒计时第 20 秒击毁"),
+            ("R2 目标死亡：熔断者熔断中被一口气打死不爆", "FgOverclockFactionSelfCheck", "FgOverclockFactionSelfCheck.cs", "B5 负向：熔断中被一口气打死不爆"),
+            ("R2 目标死亡：冷却塔被摧毁 → 塔旁回到辐射上限", "FgHeatDataCitySelfCheck", "FgHeatDataCitySelfCheck.cs", "C2 负向（冷却塔被摧毁）"),
+            ("R3 失联：余烬主机封锁信号核槽位 → 槽里固件失效、程序树重排、写原因", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "C1 FGT-FAC-006 / FGT-EMG-061 阶段二·槽位封锁"),
+            ("R3 恢复：摧毁尖刺夺回槽位（拆 2 根仍封锁），同签名、冷却不重置", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "C2 摧毁尖刺夺回槽位"),
+            ("R3 反夺控：装反夺控的机器挡住正式来源的封锁", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "I1 DEBT-EMG4FW01-01 反夺控正式入口"),
+            ("R3 断网：远征队走出覆盖先提醒、走出后提示（行军系统与第一幕同一套）", "FgMilestoneM8SelfCheck", "FgMilestoneM8SelfCheck.World.cs", "R3 断网 / 失联（FGR-SIG-053）"),
+            ("R4 暂停与倍速：暂停时熔断者不爆、0.5x～3x 同按游戏秒引爆", "FgOverclockFactionSelfCheck", "FgOverclockFactionSelfCheck.cs", "H1 暂停 6 秒熔断者不爆"),
+            ("R4 暂停与倍速：暂停中打掉冷却塔、各倍速结算一致", "FgHeatDataCitySelfCheck", "FgHeatDataCitySelfCheck.cs", "C3 暂停 / 倍速"),
+            ("R4 暂停与倍速：攻城中接触熔断的引信按游戏秒", "FgOverclockRaidSelfCheck", "FgOverclockRaidSelfCheck.cs", "E1 接触熔断的引信按游戏秒"),
+            ("R4 暂停与倍速：余烬主机计时按游戏时间、观察与不观察一致", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "G1 B09 / FGR-BASE-021"),
+            ("R4 暂停与倍速：暂停时注电不电解、状态哈希不变", "FgOverclockReactionSelfCheck", "FgOverclockReactionSelfCheck.cs", "暂停（0 秒步）注电"),
+            ("R5 存读档：余烬主机阶段二中途存档 → 读档一致", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "F1 阶段二中途存档"),
+            ("R5 存读档：余烬主机阶段三中途存档 → 熔毁倒计时接续", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "F2 阶段三中途存档"),
+            ("R5 存读档：熔断中真文件存档 → 读档接着跑", "FgOverclockRaidSelfCheck", "FgOverclockRaidSelfCheck.cs", "F1 熔断中真文件存档"),
+            ("R5 存读档：镜像复制品存读档", "FgOverclockFactionSelfCheck", "FgOverclockFactionSelfCheck.cs", "F3 DEBT-EMG4HIJ02-02：复制 → 存读档"),
+            ("R5 存读档：两支远征在外时存读档", "FgMultiExpeditionSelfCheck", "FgExpeditionMarchSelfCheck.cs", "X4 两支在外时存读档（B10）"),
+            ("R6 路径失败：敌方突袭者追击 L 形墙后的目标 → 寻路绕过去（FG-GAP-223）", "FgNavSelfCheck", "FgNavSelfCheck.cs", "FG-GAP-223 敌方突袭者追击 L 形墙后的目标"),
+            ("R6 路径失败：目标被围死 → 放弃追击后限频重选（不刷寻路）", "FgNavSelfCheck", "FgNavSelfCheck.cs", "FG-GAP-223 围死目标"),
+            ("R6 路径失败：远征地点被占 → 第 2 队在集结点等候", "FgMultiExpeditionSelfCheck", "FgExpeditionMarchSelfCheck.cs", "X3 同一时刻只能载入一个远征地点"),
+            ("R6 路径失败：远征路线被截断 → 停下、提示、投送舱接回", "FgMilestoneM8SelfCheck", "FgMilestoneM8SelfCheck.World.cs", "R6 路径失败：锚点被悬崖围住"),
+        };
+
         private static void CheckReverseScenarios()
         {
             Line("  · R. IC-REQ-022 六类反向（超频段）：每类至少一条起真实系统的断言仍在源码里、所在段登记在全量自检；里程碑风险“槽位劫持后无法归还”；承接项各有断言");
             var segments = new HashSet<string>(CellFrameworkValidate.SegmentNames, StringComparer.Ordinal);
-            var map = new (string Category, string Segment, string File, string Label)[]
-            {
-                ("R1 条件不足：40 米外发动核心固件 → 镜像体不复制", "FgOverclockFactionSelfCheck", "FgOverclockFactionSelfCheck.cs", "F1 FGR-EMG-164：40 米外发动核心固件不复制"),
-                ("R1 条件不足：第一幕超频领地还没出现 → 贡献全是超频也不由超频发动突袭", "FgOverclockRaidSelfCheck", "FgOverclockRaidSelfCheck.cs", "B2 负向：第一幕超频领地还没出现"),
-                ("R1 条件不足：没有防腐涂层时 2 级污染上建中继被拦并写明涂层；3 级照旧被拦并写明出路", "FgHeatDataCitySelfCheck", "FgHeatDataCitySelfCheck.cs", "D1 FG-GAP-164（第 3 项"),
-                ("R1 条件不足：只有一支 / 没有远征在外时“切换远征队”被拒", "FgMultiExpeditionSelfCheck", "FgExpeditionMarchSelfCheck.cs", "X1 两支分头出发（FG-GAP-016）"),
-                ("R2 目标死亡：余烬主机战场上机器全灭 → 数据中心卸载、首领复位、可重试", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "E1 负向“全灭重试”"),
-                ("R2 目标死亡：熔毁倒计时中击毁余烬主机 → 不再熔毁、没有残留封锁", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "D1 负向：倒计时第 20 秒击毁"),
-                ("R2 目标死亡：熔断者熔断中被一口气打死不爆", "FgOverclockFactionSelfCheck", "FgOverclockFactionSelfCheck.cs", "B5 负向：熔断中被一口气打死不爆"),
-                ("R2 目标死亡：冷却塔被摧毁 → 塔旁回到辐射上限", "FgHeatDataCitySelfCheck", "FgHeatDataCitySelfCheck.cs", "C2 负向（冷却塔被摧毁）"),
-                ("R3 失联：余烬主机封锁信号核槽位 → 槽里固件失效、程序树重排、写原因", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "C1 FGT-FAC-006 / FGT-EMG-061 阶段二·槽位封锁"),
-                ("R3 恢复：摧毁尖刺夺回槽位（拆 2 根仍封锁），同签名、冷却不重置", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "C2 摧毁尖刺夺回槽位"),
-                ("R3 反夺控：装反夺控的机器挡住正式来源的封锁", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "I1 DEBT-EMG4FW01-01 反夺控正式入口"),
-                ("R3 断网：远征队走出覆盖先提醒、走出后提示（行军系统与第一幕同一套）", "FgMilestoneM8SelfCheck", "FgMilestoneM8SelfCheck.World.cs", "R3 断网 / 失联（FGR-SIG-053）"),
-                ("R4 暂停与倍速：暂停时熔断者不爆、0.5x～3x 同按游戏秒引爆", "FgOverclockFactionSelfCheck", "FgOverclockFactionSelfCheck.cs", "H1 暂停 6 秒熔断者不爆"),
-                ("R4 暂停与倍速：暂停中打掉冷却塔、各倍速结算一致", "FgHeatDataCitySelfCheck", "FgHeatDataCitySelfCheck.cs", "C3 暂停 / 倍速"),
-                ("R4 暂停与倍速：攻城中接触熔断的引信按游戏秒", "FgOverclockRaidSelfCheck", "FgOverclockRaidSelfCheck.cs", "E1 接触熔断的引信按游戏秒"),
-                ("R4 暂停与倍速：余烬主机计时按游戏时间、观察与不观察一致", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "G1 B09 / FGR-BASE-021"),
-                ("R4 暂停与倍速：暂停时注电不电解、状态哈希不变", "FgOverclockReactionSelfCheck", "FgOverclockReactionSelfCheck.cs", "暂停（0 秒步）注电"),
-                ("R5 存读档：余烬主机阶段二中途存档 → 读档一致", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "F1 阶段二中途存档"),
-                ("R5 存读档：余烬主机阶段三中途存档 → 熔毁倒计时接续", "FgEmberHostSelfCheck", "FgEmberHostSelfCheck.cs", "F2 阶段三中途存档"),
-                ("R5 存读档：熔断中真文件存档 → 读档接着跑", "FgOverclockRaidSelfCheck", "FgOverclockRaidSelfCheck.cs", "F1 熔断中真文件存档"),
-                ("R5 存读档：镜像复制品存读档", "FgOverclockFactionSelfCheck", "FgOverclockFactionSelfCheck.cs", "F3 DEBT-EMG4HIJ02-02：复制 → 存读档"),
-                ("R5 存读档：两支远征在外时存读档", "FgMultiExpeditionSelfCheck", "FgExpeditionMarchSelfCheck.cs", "X4 两支在外时存读档（B10）"),
-                ("R6 路径失败：敌方突袭者追击 L 形墙后的目标 → 寻路绕过去（FG-GAP-223）", "FgNavSelfCheck", "FgNavSelfCheck.cs", "FG-GAP-223 敌方突袭者追击 L 形墙后的目标"),
-                ("R6 路径失败：目标被围死 → 放弃追击后限频重选（不刷寻路）", "FgNavSelfCheck", "FgNavSelfCheck.cs", "FG-GAP-223 围死目标"),
-                ("R6 路径失败：远征地点被占 → 第 2 队在集结点等候", "FgMultiExpeditionSelfCheck", "FgExpeditionMarchSelfCheck.cs", "X3 同一时刻只能载入一个远征地点"),
-                ("R6 路径失败：远征路线被截断 → 停下、提示、投送舱接回", "FgMilestoneM8SelfCheck", "FgMilestoneM8SelfCheck.World.cs", "R6 路径失败：锚点被悬崖围住"),
-            };
+            var map = ReverseMap;
             var bad = new List<string>();
             var cats = new HashSet<string>(StringComparer.Ordinal);
             foreach ((string category, string segment, string file, string label) in map)

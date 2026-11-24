@@ -200,29 +200,31 @@ namespace GameLogic.EditorTools
 
         // ── R. IC-REQ-022 反向场景 ─────────────────────────────────────────────────
 
+        internal static readonly (string Category, string Segment, string File, string Label)[] ReverseMap =
+        {
+            ("R1 资源 / 条件不足：核心门三灯未亮 → 拒绝进入并逐项写明缺什么", "NegativePathSelfCheck", "NegativePathSelfCheck.cs", "核心门三灯未亮：拒绝进入并逐项写明缺什么"),
+            ("R1 资源不足：严酷难度（资源更紧）第一幕仍能走完、核心不丢", "FgAct1BalanceSelfCheck", "FgAct1BalanceSelfCheck.cs", "C1 严酷（种子 42）：第一幕走完"),
+            ("R2 目标死亡：铸造主核心阶段三窗口期内全灭 → 复位到开战前、记上次止步于、首领战前自动存档可重试", "FgFoundryFactionSelfCheck", "FgFoundryFactionSelfCheck.cs", "C8 负向“阶段三窗口期内全灭”"),
+            ("R2 目标死亡：寂听主脑首领战全灭 → 大厅卸载、首领复位", "FgSilentFactionSelfCheck", "FgSilentFactionSelfCheck.cs", "C10 FGT-FAC-004 首领战全灭"),
+            ("R3 断网 / 失联：干扰机的干扰场 10 米内被干扰、13 米外不干扰；击毁干扰机后干扰场随之解除", "FgEnemyTableSelfCheck", "FgEnemyTableSelfCheck.cs", "干扰场随之解除"),
+            ("R3 恢复：撑过全频静默后可以再接入", "FgSilentFactionSelfCheck", "FgSilentFactionSelfCheck.cs", "静默结束后可以再接入"),
+            ("R4 暂停与倍速：铸造主核心对空形态 → 狂暴在 0.5x / 1x（中途暂停）/ 2x / 3x 下逐位相同", "FgFoundryFactionSelfCheck", "FgFoundryFactionSelfCheck.cs", "C10 B09 / FGR-BASE-021"),
+            ("R4 暂停与倍速：寂听主脑 26 游戏秒在 0.5x～3x（中途暂停）下逐位相同", "FgSilentFactionSelfCheck", "FgSilentFactionSelfCheck.cs", "C12 B09 / FGR-BASE-021"),
+            ("R4 暂停与倍速：节奏台账暂停不推进、各倍速记在同一步", "FgAct1SelfCheck", "FgAct1SelfCheck.cs", "B8 暂停时节奏台账不推进"),
+            ("R5 存读档：铸造主核心首领战中存档读档一致、续跑逐位相同", "FgFoundryFactionSelfCheck", "FgFoundryFactionSelfCheck.cs", "C7 FGT-FAC-003 首领战中存档"),
+            ("R5 存读档：寂听主脑首领战中存档", "FgSilentFactionSelfCheck", "FgSilentFactionSelfCheck.cs", "C9 FGT-FAC-003 首领战中存档"),
+            ("R5 存读档：节奏台账逐字段一致、读档不补发不重记", "FgAct1SelfCheck", "FgAct1SelfCheck.cs", "B9 存读档：节奏台账逐字段一致"),
+            ("R6 路径失败（第一幕 0:04～8:30，没有中继 / 投送站）：覆盖外“路线被截断”→ 提示一次、按最后的“前进”自动重试、打通后进入地点", "FgExpeditionMarchSelfCheck", "FgExpeditionMarchSelfCheck.cs", "M11b 打通后下一次自动重试走进去并进入远征地点"),
+            ("R6 路径失败（覆盖内 / 投送站解锁后）：行军“路线被截断”停下待命、提示原因 → 改用投送舱接回", "FgMilestoneM8SelfCheck", "FgMilestoneM8SelfCheck.World.cs", "R6 恢复：在截断点旁呼叫投送舱"),
+            ("R6 路径失败：门锁着时右键核心区禁区 → 机器停在封锁线外（不穿门）", "FgAct1SelfCheck", "FgAct1SelfCheck.cs", "C13 负向：门锁着时在外圈右键核心区一侧的禁区"),
+        };
+
         private static void CheckReverseScenarios()
         {
             Line("  · R. IC-REQ-022 六类反向（第一幕）：每类至少一条起真实系统的断言仍在源码里、所在段登记在全量自检；能进旅程的另有 FGJ-M9 步骤");
             var segments = new HashSet<string>(CellFrameworkValidate.SegmentNames, StringComparer.Ordinal);
             JourneyDef m9 = JourneyCatalog.Create(FgjM9Journey.Id);
-            var map = new (string Category, string Segment, string File, string Label)[]
-            {
-                ("R1 资源 / 条件不足：核心门三灯未亮 → 拒绝进入并逐项写明缺什么", "NegativePathSelfCheck", "NegativePathSelfCheck.cs", "核心门三灯未亮：拒绝进入并逐项写明缺什么"),
-                ("R1 资源不足：严酷难度（资源更紧）第一幕仍能走完、核心不丢", "FgAct1BalanceSelfCheck", "FgAct1BalanceSelfCheck.cs", "C1 严酷（种子 42）：第一幕走完"),
-                ("R2 目标死亡：铸造主核心阶段三窗口期内全灭 → 复位到开战前、记上次止步于、首领战前自动存档可重试", "FgFoundryFactionSelfCheck", "FgFoundryFactionSelfCheck.cs", "C8 负向“阶段三窗口期内全灭”"),
-                ("R2 目标死亡：寂听主脑首领战全灭 → 大厅卸载、首领复位", "FgSilentFactionSelfCheck", "FgSilentFactionSelfCheck.cs", "C10 FGT-FAC-004 首领战全灭"),
-                ("R3 断网 / 失联：干扰机的干扰场 10 米内被干扰、13 米外不干扰；击毁干扰机后干扰场随之解除", "FgEnemyTableSelfCheck", "FgEnemyTableSelfCheck.cs", "干扰场随之解除"),
-                ("R3 恢复：撑过全频静默后可以再接入", "FgSilentFactionSelfCheck", "FgSilentFactionSelfCheck.cs", "静默结束后可以再接入"),
-                ("R4 暂停与倍速：铸造主核心对空形态 → 狂暴在 0.5x / 1x（中途暂停）/ 2x / 3x 下逐位相同", "FgFoundryFactionSelfCheck", "FgFoundryFactionSelfCheck.cs", "C10 B09 / FGR-BASE-021"),
-                ("R4 暂停与倍速：寂听主脑 26 游戏秒在 0.5x～3x（中途暂停）下逐位相同", "FgSilentFactionSelfCheck", "FgSilentFactionSelfCheck.cs", "C12 B09 / FGR-BASE-021"),
-                ("R4 暂停与倍速：节奏台账暂停不推进、各倍速记在同一步", "FgAct1SelfCheck", "FgAct1SelfCheck.cs", "B8 暂停时节奏台账不推进"),
-                ("R5 存读档：铸造主核心首领战中存档读档一致、续跑逐位相同", "FgFoundryFactionSelfCheck", "FgFoundryFactionSelfCheck.cs", "C7 FGT-FAC-003 首领战中存档"),
-                ("R5 存读档：寂听主脑首领战中存档", "FgSilentFactionSelfCheck", "FgSilentFactionSelfCheck.cs", "C9 FGT-FAC-003 首领战中存档"),
-                ("R5 存读档：节奏台账逐字段一致、读档不补发不重记", "FgAct1SelfCheck", "FgAct1SelfCheck.cs", "B9 存读档：节奏台账逐字段一致"),
-                ("R6 路径失败（第一幕 0:04～8:30，没有中继 / 投送站）：覆盖外“路线被截断”→ 提示一次、按最后的“前进”自动重试、打通后进入地点", "FgExpeditionMarchSelfCheck", "FgExpeditionMarchSelfCheck.cs", "M11b 打通后下一次自动重试走进去并进入远征地点"),
-                ("R6 路径失败（覆盖内 / 投送站解锁后）：行军“路线被截断”停下待命、提示原因 → 改用投送舱接回", "FgMilestoneM8SelfCheck", "FgMilestoneM8SelfCheck.World.cs", "R6 恢复：在截断点旁呼叫投送舱"),
-                ("R6 路径失败：门锁着时右键核心区禁区 → 机器停在封锁线外（不穿门）", "FgAct1SelfCheck", "FgAct1SelfCheck.cs", "C13 负向：门锁着时在外圈右键核心区一侧的禁区"),
-            };
+            var map = ReverseMap;
             var bad = new List<string>();
             var cats = new HashSet<string>(StringComparer.Ordinal);
             foreach ((string category, string segment, string file, string label) in map)

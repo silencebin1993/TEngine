@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using BinGames.Sim.Combat;
 using GameLogic.Campaign;
@@ -129,6 +130,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 // ── 6. 结局、结算、继续 ──
                 S("e_cut", "结局演出接管画面：点“跳过演出”→ 确认框点“跳过”；结局落盘后打开结算", 90, null, TickEndingCutscene),
                 S("e_stats", "结算画面：统计（归还面积 / 天数 / 反应 / 熔合配方 / 击退突袭）、幸存机器与纪念墙、结语", 20, null, TickSettlement),
+                S("e_handoff", "交接：正式结局自动存档写下的这一份（结算开着、还没选“继续”）连同代码指纹抄给 FGJ-M14（DEBT-FG14E2E01-01：后日谈从真实结局存档进入）", 15, null, TickHandoff),
                 S("e_continue", "结算点“继续”：进入后日谈、结算关闭、存档允许", 30, null, TickContinue, retries: 2),
             };
             steps.InsertRange(steps.FindIndex(x => x.Id == "purge_done"), PurgeWaveSteps());
@@ -1190,6 +1192,77 @@ namespace GameLogic.EditorTools.JourneyBots
             string msg = $"统计：归还面积 {st.ReturnedArea}、{st.Days} 天、反应 {st.Reactions}、熔合配方 {st.FusionRecipes}、击退突袭 {st.RaidsRepelled}；作战队幸存 {survivors}/{Team(c).Count}（家园 {SquadSize} + 滩头增援 {ReinforceSize}）；结算期间存档被拦 {blocked}";
             return st.Days >= 1 && st.RaidsRepelled >= 1 && blocked && survivors > 0 ? StepOutcome.Done(msg) : StepOutcome.Fail(msg);
         }
+
+        // ── 结局存档交接给 FGJ-M14（FG15-QA-01 修复第 1 轮：DEBT-FG14E2E01-01 的通关存档夹具改由本旅程打出的真实结局提供）──
+
+        /// <summary>交接目录（断点根目录下，gitignore、只在本机；回归包 / 并行脚本把 FGJ-M13 与 FGJ-M14 排在同一车道、M13 在前）。</summary>
+        internal static string HandoffDir => Path.Combine(JourneyCheckpoints.RootDir, "handoff", Id + "-ending");
+
+        private const string HandoffSave = "ending.sav";
+        private const string HandoffEnv = "env.txt";
+
+        private static StepOutcome TickHandoff(JourneyContext c)
+        {
+            int slot = CampaignSession.ActiveSlotIndex;
+            LoadResult disk = CampaignSaveService.Load(slot);
+            if (!disk.Success || !EndingService.Reached(disk.State) || disk.State.Progress.IsPostgame)
+            {
+                return StepOutcome.Fail($"槽位 {slot + 1} 不是结局存档：读取 {disk.Outcome}、结局 {(disk.Success && EndingService.Reached(disk.State))}、后日谈 {disk.State?.Progress.IsPostgame}");
+            }
+            string dir = HandoffDir;
+            Directory.CreateDirectory(dir);
+            File.Copy(CampaignSaveService.SlotPath(slot), Path.Combine(dir, HandoffSave), true);
+            JourneyCheckpoints.EnvInfo env = JourneyCheckpoints.EnvInfo.Current();
+            File.WriteAllLines(Path.Combine(dir, HandoffEnv), new[]
+            {
+                "code=" + env.CodeHash, "schema=" + env.SaveSchema.ToString(CultureInfo.InvariantCulture), "content=" + env.ContentVersion.ToString(CultureInfo.InvariantCulture),
+                "generator=" + env.GeneratorVersion.ToString(CultureInfo.InvariantCulture), "slot=" + slot.ToString(CultureInfo.InvariantCulture),
+                "ticks=" + disk.State.Clock.Ticks.ToString(CultureInfo.InvariantCulture), "at=" + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture),
+                // 指纹只核交接那一刻的代码；从断点续跑（尤其 --allow-code-change）时前半段世界不是这份代码跑出来的，如实记下，FGJ-M14 读入时写进结果。
+                "resumed=" + (c.Journey.ResumedFrom ?? string.Empty), "oldcode=" + (JourneyBotHost.ResumedWithOldCode ? "1" : "0"),
+            });
+            return StepOutcome.Done($"结局存档（槽位 {slot + 1}，第 {disk.State.Clock.Ticks} 步，存档原因 {disk.State.LastSaveReason}）抄到 {dir}；代码指纹 {env.CodeHash}；{Provenance(c.Journey.ResumedFrom, JourneyBotHost.ResumedWithOldCode ? "1" : "0")}");
+        }
+
+        /// <summary>
+        /// FGJ-M14 读入交接的结局存档：写进测试存档目录（<see cref="CampaignSaveService.SaveDirectory"/>，进 Play 时已改到临时目录）的同一槽位，之后由玩家路径“读取”。
+        /// 没有交接、或交接来自另一份代码 / 存档格式 / 内容 / 生成器版本时返回 false 并写明“先重跑 FGJ-M13”——不退回夹具。
+        /// </summary>
+        internal static bool TryImportEnding(out int slot, out long ticks, out string note)
+        {
+            slot = 0;
+            ticks = 0;
+            string dir = HandoffDir;
+            string save = Path.Combine(dir, HandoffSave);
+            string envPath = Path.Combine(dir, HandoffEnv);
+            if (!File.Exists(save) || !File.Exists(envPath))
+            {
+                note = $"没有 FGJ-M13 留下的结局存档交接（{dir}）：先跑 bash tools/unity-journey.sh FGJ-M13（回归包 / 并行脚本会把两条排在同一车道、M13 在前）";
+                return false;
+            }
+            Dictionary<string, string> kv = File.ReadAllLines(envPath).Select(l => l.Split(new[] { '=' }, 2)).Where(x => x.Length == 2).ToDictionary(x => x[0], x => x[1]);
+            JourneyCheckpoints.EnvInfo env = JourneyCheckpoints.EnvInfo.Current();
+            string V(string k) => kv.TryGetValue(k, out string v) ? v : "?";
+            string I(int v) => v.ToString(CultureInfo.InvariantCulture);
+            if (V("code") != env.CodeHash || V("schema") != I(env.SaveSchema) || V("content") != I(env.ContentVersion) || V("generator") != I(env.GeneratorVersion))
+            {
+                note = $"结局存档交接（{V("at")}）来自另一份代码：指纹 {V("code")} / 格式 {V("schema")} / 内容 {V("content")} / 生成器 {V("generator")}，" +
+                       $"当前 {env.CodeHash} / {env.SaveSchema} / {env.ContentVersion} / {env.GeneratorVersion}：先重跑 FGJ-M13";
+                return false;
+            }
+            slot = int.Parse(V("slot"), CultureInfo.InvariantCulture);
+            ticks = long.Parse(V("ticks"), CultureInfo.InvariantCulture);
+            File.Copy(save, CampaignSaveService.SlotPath(slot), true);
+            note = $"读入 FGJ-M13 {V("at")} 交接的结局存档 → 槽位 {slot + 1}（第 {ticks} 步，代码指纹一致 {env.CodeHash}；{Provenance(kv.TryGetValue("resumed", out string r) ? r : null, V("oldcode"))}）";
+            return true;
+        }
+
+        /// <summary>交接存档的来历：完整跑 / 从断点续跑 / 从旧代码断点续跑（结论只供迭代参考）/ 旧交接没记。</summary>
+        private static string Provenance(string resumedFrom, string oldCode) =>
+            resumedFrom == null ? "交接没记来历（修复第 2 轮之前写的）"
+            : resumedFrom.Length == 0 ? "FGJ-M13 从主菜单完整跑出的结局"
+            : oldCode == "1" ? $"FGJ-M13 从旧代码断点“{resumedFrom}”续跑（--allow-code-change）：前半段世界是旧代码跑出来的，结论只供迭代参考"
+            : $"FGJ-M13 从断点“{resumedFrom}”续跑（断点与当前代码同一指纹）";
 
         internal static StepOutcome TickContinue(JourneyContext c)
         {

@@ -139,6 +139,7 @@ namespace GameLogic.EditorTools
                 Step(CheckDamageAndReactions);
                 Step(CheckSettlementWithdrawn);
                 Step(CheckLosses);
+                Step(CheckLossesNonKernel);
                 Step(CheckWreckHaulAndBench);
                 Step(CheckWreckRecyclerAndOff);
                 Step(CheckWreckFallback);
@@ -853,6 +854,74 @@ namespace GameLogic.EditorTools
             Expect(quiet && victim != null && counted,
                 $"B5 损失：攻城中被拆的建筑“{victimName}”、被打掉的炮塔、阵亡的机器各记一处（合计 {RaidResultService.LossTotal(r)}，明细带当时的名字与位置，第一处损失进过程）；" +
                 $"负向：没有攻城时阵亡的机器不进任何结算（{quiet}）");
+        }
+
+        /// <summary>
+        /// DEBT-FG15QA01-04（FGR-DEF-050 损失；FG15-QA-01 回归包 FGJ-M6R 两次“结算损失 False”的入口）：攻城进行中，不经内核结构单位阵亡被摧毁的建筑也进进行中那一份的损失表、来源写对——
+        /// ① 经 <see cref="BuildingOps.ApplyDamage(CampaignState, string, float, bool, int)"/>（天气 / 蠕虫 / 轨道投放同一入口）→ 来源 field；
+        /// ② 己方机器留下的明火斑块烧蚀（内核斑块上报 → PipeLeakService 对账 → ApplyDamage）→ 来源 player:，同时发设施友伤通知；
+        /// ③ 炮塔先被 ApplyDamage 摧毁、内核炮塔单位随后才阵亡（对账移除前）只记一处；④ 屏障（防御建筑）同一时序同样只记一处；负向：没有攻城时经 ApplyDamage 摧毁不进任何结算。
+        /// </summary>
+        private static void CheckLossesNonKernel()
+        {
+            CampaignState s = NewWorld(8107);
+            BuildingRecord quiet = Place(s, HomeValleyLayout.BuildingTypeAnalysisBench, 6f, 30f);
+            bool quietDestroyed = quiet != null && BuildingOps.ApplyDamage(s, quiet.BuildingId, 1e7f, notify: false);
+            bool quietOk = quietDestroyed && RaidResultService.All(s).Count == 0;
+            TransitGroupRecord g = Raid(s, OutsidePoint(s, 36f, 8), 4);
+            Seconds(0.6f);
+            RaidResultRecord r = RaidResultService.OpenFor(s, g.GroupId);
+            bool primary = r != null && RaidResultService.PrimaryOpen(s) == r;
+
+            // ① 正式伤害入口直接摧毁（无主）。
+            BuildingRecord a = Place(s, HomeValleyLayout.BuildingTypeAnalysisBench, 6f, 30f);
+            int b0 = r?.LostBuildings ?? 0;
+            bool aDestroyed = a != null && BuildingOps.ApplyDamage(s, a.BuildingId, 1e7f, notify: false);
+            RaidLossRecord la = r?.Losses.FirstOrDefault(x => x.Id == a?.BuildingId);
+            bool aOk = aDestroyed && la != null && la.Kind == RaidResultService.KindBuilding && la.Source == "field" && r.LostBuildings == b0 + 1;
+
+            // ② 己方明火斑块烧到自家建筑：先经正式入口打到只剩 2 点耐久（缩短烧穿时间），再在它上面铺一块归属本机器的明火。
+            BuildingRecord b = Place(s, HomeValleyLayout.BuildingTypeAnalysisBench, 6f, 30f);
+            int machine = HomeMachine(s, out int mu);
+            if (b != null)
+            {
+                BuildingOps.ApplyDamage(s, b.BuildingId, BuildingOps.MaxDurability(b.BuildingTypeId) - 2f, notify: false);
+            }
+            int friendly0 = GameLogic.Campaign.Logistics.PipeLeakService.StructFriendlyPosted;
+            bool patch = b != null && mu > 0 && Site.Kernel.SpawnPatch(EmgMatterConst.Fire, new Unity.Mathematics.double2(b.Position.x, b.Position.y), 1.5f, 1f, 30f, mu);
+            bool burned = patch && F.StepUntil(() => b.ConstructionState == BuildingConstructionState.Damaged, 20);
+            RaidLossRecord lb = r?.Losses.FirstOrDefault(x => x.Id == b?.BuildingId);
+            bool friendly = GameLogic.Campaign.Logistics.PipeLeakService.StructFriendlyPosted > friendly0; // 斑块烧蚀那条路（PipeLeakService 对账）发出的设施友伤通知
+            bool bOk = burned && lb != null && lb.Kind == RaidResultService.KindBuilding && lb.Source.StartsWith("player:", StringComparison.Ordinal) && friendly;
+
+            // ③ 炮塔：ApplyDamage 摧毁 → 内核炮塔单位在对账移除前阵亡，只记一处。
+            BuildingRecord t = Place(s, L, needPower: true);
+            int tUnit = TurretUnit(s, t);
+            int t0 = r?.LostTurrets ?? 0;
+            bool tDestroyed = t != null && tUnit > 0 && BuildingOps.ApplyDamage(s, t.BuildingId, 1e7f, notify: false);
+            bool kernelKill = tDestroyed && Site.Kernel.Kill(tUnit, Raiders(g).FirstOrDefault());
+            WorldSimulation.StepMany(2);
+            int tLosses = r?.Losses.Count(x => x.Id == t?.BuildingId) ?? 0;
+            bool tOk = kernelKill && r.LostTurrets == t0 + 1 && tLosses == 1 && RaidResultService.LossTotal(r) == r.Losses.Length;
+
+            // ④ 防御建筑（屏障）同一时序：ApplyDamage 摧毁 → 内核防御结构单位在对账移除前阵亡，只记一处（DefenseService 的 IsBuilt 守卫）。
+            BuildingRecord w = Place(s, DefenseCatalog.BarrierT1, 6f, 24f);
+            WorldSimulation.StepMany(2);
+            DefenseRecord wr = w != null ? DefenseService.Find(s, w.BuildingId) : null;
+            int wUnit = wr != null && Site != null && Site.TryGetDefenseUnit(wr.Serial, out int du) ? du : 0;
+            int w0 = r?.LostDefenses ?? 0;
+            bool wDestroyed = wUnit > 0 && BuildingOps.ApplyDamage(s, w.BuildingId, 1e7f, notify: false);
+            bool wKernelKill = wDestroyed && Site.Kernel.Kill(wUnit, Raiders(g).FirstOrDefault());
+            WorldSimulation.StepMany(2);
+            int wLosses = r?.Losses.Count(x => x.Id == w?.BuildingId) ?? 0;
+            bool wOk = wKernelKill && r.LostDefenses == w0 + 1 && wLosses == 1 && RaidResultService.LossTotal(r) == r.Losses.Length;
+
+            Expect(quietOk && primary && aOk && bOk && tOk && wOk,
+                $"B5b 不经内核阵亡的损失（DEBT-FG15QA01-04）：攻城进行中 ① 经 BuildingOps.ApplyDamage 摧毁的解析台进了进行中那一份（{aOk}，来源 {la?.Source ?? "无"}）；" +
+                $"② 己方机器 #{machine} 的明火斑块烧穿解析台（{burned}）也记一处（{bOk}，来源 {lb?.Source ?? "无"}，设施友伤通知 {friendly}）；" +
+                $"③ 炮塔先被 ApplyDamage 摧毁、内核单位随后阵亡（{kernelKill}）只记 {tLosses} 处（炮塔损失 {t0} → {r?.LostTurrets}）；" +
+                $"④ 屏障先被 ApplyDamage 摧毁、内核防御单位随后阵亡（{wKernelKill}）只记 {wLosses} 处（防御损失 {w0} → {r?.LostDefenses}）；合计 {RaidResultService.LossTotal(r)} = 明细 {r?.Losses.Length}；" +
+                $"负向：没有攻城时经 ApplyDamage 摧毁不进任何结算（{quietOk}）");
         }
 
         // ── C 残骸 ────────────────────────────────────────────────────────────

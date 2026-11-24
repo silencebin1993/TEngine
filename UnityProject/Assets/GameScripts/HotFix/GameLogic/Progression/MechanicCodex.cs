@@ -147,6 +147,9 @@ namespace GameLogic.Progression
         /// <summary>自检把文件放到临时目录。</summary>
         public static string FilePathOverrideForTests;
 
+        /// <summary>FG15-QA-01（DEBT-FG9E2E01-03）：旅程隔离图鉴时不按本机设置里“见过的引导钩子”补解锁（引导钩子本身不动，引导照常不重复弹出）；ResetForTests 清掉。</summary>
+        public static bool SkipSeenHookBackfillForTests;
+
         private static List<MechanicCodexEntry> _entries;
         private static Dictionary<string, MechanicCodexEntry> _byId;
         private static HashSet<string> _unlocked;
@@ -506,6 +509,7 @@ namespace GameLogic.Progression
             Reload();
             _loggedError = false;
             FilePathOverrideForTests = null;
+            SkipSeenHookBackfillForTests = false;
             OpenRequested = null;
             SaveCount = 0;
             OpenCount = 0;
@@ -832,7 +836,7 @@ namespace GameLogic.Progression
                     _unlocked.Add(e.Id);
                     continue;
                 }
-                foreach (string h in e.Hooks)
+                foreach (string h in SkipSeenHookBackfillForTests ? Array.Empty<string>() : e.Hooks)
                 {
                     if (GameSettings.HasSeenGuidanceHook(h))
                     {

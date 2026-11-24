@@ -535,8 +535,9 @@ namespace GameLogic.Campaign.Economy
         /// </summary>
         public static bool ApplyDamage(CampaignState state, string buildingId, float amount) => ApplyDamage(state, buildingId, amount, notify: true);
 
-        /// <summary>FG7-ENV-03：<paramref name="notify"/> = false 时不发逐座的建筑受损通知（天气按游戏分钟批量结算，由天气系统发汇总通知；被摧毁照常通知）。</summary>
-        public static bool ApplyDamage(CampaignState state, string buildingId, float amount, bool notify)
+        /// <summary>FG7-ENV-03：<paramref name="notify"/> = false 时不发逐座的建筑受损通知（天气按游戏分钟批量结算，由天气系统发汇总通知；被摧毁照常通知）。
+        /// <paramref name="attacker"/> = 造成伤害的内核单位（物质斑块的归属；0 = 无主，天气 / 蠕虫 / 轨道投放），只用于突袭结算的损失来源。</summary>
+        public static bool ApplyDamage(CampaignState state, string buildingId, float amount, bool notify, int attacker = 0)
         {
             BuildingRecord b = HomeGridService.FindBuilding(state, buildingId);
             if (b == null || amount <= 0f || HomeGridService.IsRelocationGhost(b)
@@ -566,7 +567,12 @@ namespace GameLogic.Campaign.Economy
                     }
                     return false;
                 }
-                return HomeValleyPowerGrid.ApplyBuildingDestroyed(state, buildingId);
+                if (!HomeValleyPowerGrid.ApplyBuildingDestroyed(state, buildingId))
+                {
+                    return false;
+                }
+                Defense.RaidResultService.NoteBuildingDestroyed(state, b, attacker); // DEBT-FG15QA01-04：突袭进行中 / 余波里经本入口摧毁也进结算损失
+                return true;
             }
             Defense.RepairDroneService.CommitRecordDurability(state, b);
             if (before >= max - 0.01f)

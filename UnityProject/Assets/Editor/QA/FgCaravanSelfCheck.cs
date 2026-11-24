@@ -728,7 +728,7 @@ namespace GameLogic.EditorTools
                 string viewSrc = File.ReadAllText("Assets/GameScripts/HotFix/GameLogic/View/CaravanViews.cs");
                 string homeSrc = File.ReadAllText("Assets/GameScripts/HotFix/GameLogic/Campaign/Regions/HomeValleyController.cs");
                 int select = homeSrc.IndexOf("SquadCommands.SelectSingle(marker.LogicId", StringComparison.Ordinal);
-                int caravan = homeSrc.IndexOf("CaravanViews.TryClick(ray))", StringComparison.Ordinal); // 机器分支之后那一处（无命中分支里写的是“TryClick(ray) ||”）
+                int caravan = homeSrc.IndexOf("CaravanViews.TryClick(BinGames.Sim.ViewOrigin.ToWorld(ray)))", StringComparison.Ordinal); // 机器分支之后那一处（无命中分支里写的是“TryClick(…) ||”）；FG15-SYS-02 浮动原点后射线先换回世界坐标（FG15-QA-01 回归包查出，断言跟改）
                 bool routed = !viewSrc.Contains("GetMouseButton") && !viewSrc.Contains("MousePosition") && select > 0 && caravan > select
                               && homeSrc.Contains("if (!TryReadPrimaryClick(SquadCommands.ConsumedClickThisFrame, out Vector3 pointer))");
                 Expect(direct && armed && plain && secondary && routed,

@@ -20,7 +20,7 @@ namespace GameLogic.EditorTools
     /// 删掉或改名任一条都会让本段失败（被测行为本身由那些段在同一次全量自检里执行）。
     ///
     /// A. 旅程登记：FGJ-M14 覆盖里程碑原文（通关存档选择继续 → 撑过两次周期清洗 → 回主菜单用自定义种子开一局关闭突袭的沙盒，确认没有突袭），顺序正确；固定种子、沙盒种子与之不同；断点都是旅程里的步骤。
-    /// A2. FGJ-M14 源码只走输入通道；登记的夹具（DEBT-FG14E2E01-01 / 02）只在登记的方法里、恰好 N 处。
+    /// A2. FGJ-M14 源码只走输入通道；登记的夹具（DEBT-FG14E2E01-02 时间 / 触发；结局存档带来的 DEBT-FG13E2E01-01 维修站供电再置）只在登记的方法里、恰好 N 处（DEBT-FG14E2E01-01 通关存档夹具 FG15-QA-01 已删）。
     /// R. IC-REQ-022 六类反向映射（R5 三段真文件存读档）+ FG12 第 4 节负向矩阵四行 + 里程碑风险“高等级清洗超出性能预算（含涌现满载）”+ FG12 第 6 节 FGT-SBX-001～005 映射。
     /// C. 缺口清零：门禁第一个里程碑是 M14 的缺口全部 Closed / 部分关闭（剩余另有门禁）/ 顺延；M14 承接项都已 Closed；本 Story 的登记在表里、承接写进卡片正文。
     /// D. 试玩包：FG-M14 四份材料齐全，含 FG12 第 7 节两问，目录登记“可选试玩、待用户、不阻塞”。
@@ -89,8 +89,8 @@ namespace GameLogic.EditorTools
             JourneyDef m14 = JourneyCatalog.Create(FgjM14Journey.Id);
             var exit = new (string What, string[] Ids)[]
             {
-                ("从主菜单“新建”出发、固定种子、3 倍速", new[] { "menu_new", "new_game", "seed", "speed3" }),
-                ("通关存档（结局自动存档 → 返回主菜单 → 读档）选择继续，进入后日谈并看到说明", new[] { "e_save", "e_menu", "e_load", "e_loaded", "e_continue", "pg_intro" }),
+                ("从 FGJ-M13 打出的真实结局存档出发（固定种子）", new[] { "e_import", "e_load", "e_loaded", "seed" }),
+                ("通关存档（返回主菜单 → 再读档回到结算）选择继续，进入后日谈并看到说明、3 倍速", new[] { "e_menu", "e_load2", "e_loaded2", "e_continue", "pg_intro", "speed3b" }),
                 ("撑过两次周期清洗（读计划、右键散开驻防、守卫、右键敌人交战、撑过）", new[] { "p1_plan", "p1_spread", "p1_sel", "p1_fight", "p1_done", "p2_plan", "p2_fight", "p2_done", "pg_stats" }),
                 ("坚守记录可查、保存并回主菜单、存档卡显示后日谈坚守天数", new[] { "rec_open", "rec_close", "save_quit", "menu_card" }),
                 ("回主菜单“沙盒模式”用自定义种子、关闭突袭开一局，确认没有突袭、沙盒设置显示突袭关闭", new[] { "sb_open", "sb_setup", "sb_enter", "sb_check", "sb_noraid", "sb_panel" }),
@@ -131,25 +131,7 @@ namespace GameLogic.EditorTools
         /// <summary>夹具（ADR-QA-031 第 3 节）：token 只能出现在登记的方法体里，且恰好 N 处。</summary>
         private static readonly (string Token, string Method, int Count, string Debt)[] Fixtures =
         {
-            ("s.Progress.Act = ", "ApplyFixture", 1, "第三幕 DEBT-FG14E2E01-01"),
-            ("EventDirectorService.SetFrequency(", "ApplyFixture", 1, "事件频率关闭 DEBT-FG14E2E01-01"),
-            ("pw.Launched = ", "ApplyFixture", 1, "三波清洗记为已撑过 DEBT-FG14E2E01-01"),
-            (".StartTick = ", "ApplyFixture", 2, "清洗 / 旗舰起止步 DEBT-FG14E2E01-01"),
-            (".DoneTick = ", "ApplyFixture", 3, "清洗 / 滩头 / 旗舰完成步 DEBT-FG14E2E01-01"),
-            ("fs.Phase = ", "ApplyFixture", 1, "先遣旗舰记为已击退 DEBT-FG14E2E01-01"),
-            ("CampaignEventLedger.TryGrant(", "ApplyFixture", 1, "终局链四条账本（揭示 / 清洗 / 滩头 / 旗舰）DEBT-FG14E2E01-01"),
-            ("CampaignEventLedger.TryGrant(", "ApplyEnding", 1, "结局账本 DEBT-FG14E2E01-01"),
-            ("EndingService.EndingSaveHandler(", "ApplyEnding", 1, "正式结局自动存档入口 DEBT-FG14E2E01-01"),
-            ("s.UnlockedContentIds = ", "ApplyFixture", 1, "重炮 / 机枪记为已获得 DEBT-FG14E2E01-01"),
-            ("FgjM12Journey.SaveBlueprint(", "ApplyFixture", 2, "重炮作战 / 机枪作战蓝图 DEBT-FG14E2E01-01"),
-            ("FgjM12Journey.SpawnMachine(", "ApplyFixture", 1, "作战队 36 台耐久 5000 DEBT-FG14E2E01-01"),
-            ("FgProductionSelfCheck.Built(", "ApplyFixture", 1, "核心旁两座维修无人机站 DEBT-FG14E2E01-01"),
-            ("b.Health = ", "ApplyFixture", 1, "维修站满耐久 DEBT-FG14E2E01-01"),
-            ("Mega.SetPower(", "ApplyFixture", 1, "维修站供电 DEBT-FG14E2E01-01"),
-            ("Mega.SetPower(", "Watch", 1, "维修站供电被电网结算改回时再置 DEBT-FG14E2E01-01"),
-            ("HomeInventory.Add(", "ApplyFixture", 1, "仓库 200 维修件 DEBT-FG14E2E01-01"),
-            ("RepairDroneService.Sync(", "ApplyFixture", 1, "维修站登记进维修无人机服务 DEBT-FG14E2E01-01"),
-            ("CampaignAutoSaveService.SaveAuto(", "TickEndingSaved", 1, "探测：结算打开期间正式自动存档入口被拦（不写盘）DEBT-FG14E2E01-01"),
+            ("Mega.SetPower(", "Watch", 1, "结局存档里 FGJ-M13 的维修站供电被电网结算改回时再置 DEBT-FG13E2E01-01"),
             ("GameClock.SkipForTests(", "SkipToPurge", 1, "两次清洗之间的 7 个游戏日跳到发动前 30 游戏秒 DEBT-FG14E2E01-02"),
             ("GameClock.SkipForTests(", "TickNoRaid", 2, "沙盒三个游戏日每日跳到日末前 / 跳到静默夜前 2 游戏秒 DEBT-FG14E2E01-02"),
             ("RaidDirectorService.RequestStoryRaid(", "ApplyRaidTriggers", 1, "正式触发入口：剧情报复 DEBT-FG14E2E01-02"),
@@ -160,7 +142,7 @@ namespace GameLogic.EditorTools
 
         private static void CheckJourneySourcesUseInput()
         {
-            Line("  · A2. FGJ-M14 源码只走输入通道；夹具（DEBT-FG14E2E01-01 / 02）只在登记的方法里");
+            Line("  · A2. FGJ-M14 源码只走输入通道；夹具（DEBT-FG14E2E01-02、结局存档带来的 DEBT-FG13E2E01-01 供电再置）只在登记的方法里；通关存档夹具 DEBT-FG14E2E01-01 已删（改读 FGJ-M13 的真实结局存档）");
             string code = JourneyCode();
             if (!code.Contains("class FgjM14Journey"))
             {
@@ -207,7 +189,7 @@ namespace GameLogic.EditorTools
 
         private const string Pg = "FgPostgameSelfCheck", Sb = "FgSandboxSelfCheck", Wg = "FgWorldGenHomeSelfCheck";
 
-        private static readonly (string Category, string Segment, string Label)[] ReverseMap =
+        internal static readonly (string Category, string Segment, string Label)[] ReverseMap =
         {
             ("R1 条件不足：后日谈第 7 个游戏日之前清洗不来", Pg, "B2 第 7 日之前不来"),
             ("R1 条件不足：后日谈里的普通 / 剧情突袭不占清洗序号、不算清洗", Pg, "C1 负向：后日谈里的普通"),

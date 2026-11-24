@@ -24,7 +24,8 @@ namespace GameLogic.EditorTools.JourneyBots
 {
     /// <summary>
     /// FG14-E2E-01：M14 出口旅程 FGJ-M14（里程碑文档 FG-M14：“通关存档选择继续 → 撑过两次周期清洗 → 回主菜单用自定义种子开一局关闭突袭的沙盒，确认没有突袭”）。
-    /// 从主菜单“新建”出发（固定测试种子 42、标准难度），全程正式输入：左键选择 / Shift 加选、右键地面 = 移动，按钮 / 快捷键只切状态；等待段用正式 3 倍速。
+    /// 从 FGJ-M13 打到结局时由正式结局自动存档入口写下的那一份存档出发（固定测试种子 42、标准难度；FG15-QA-01 修复第 1 轮：DEBT-FG14E2E01-01 的通关存档夹具已删，
+    /// 交接见 <see cref="FgjM13Journey.TryImportEnding"/>，回归包 / 并行脚本把两条排在同一车道、M13 在前），全程正式输入：左键选择 / Shift 加选、右键地面 = 移动，按钮 / 快捷键只切状态；等待段用正式 3 倍速。
     ///
     /// 轻量口径 a：每个新核心系统至少被真实输入触发一次并断言结果——
     /// 通关存档（结局自动存档）→ 结算点“返回主菜单”→ 主菜单“读取”该槽 → 结算重新打开（读档回到结算，FG13-END-06）→ 点“继续”进入后日谈（FGR-SBX-001）→ 后日谈说明自动打开、点“知道了”→
@@ -33,8 +34,7 @@ namespace GameLogic.EditorTools.JourneyBots
     /// 沙盒档种子 = 输入值、突袭关闭；正式触发入口（剧情报复 / 净化塔 / 巨构 / 暴露 100）与三个游戏日过去都没有一波突袭 → 暂停菜单“沙盒设置”打开。
     ///
     /// 夹具（都写在步骤标题与报告里；被测行为全走正式系统）：
-    /// DEBT-FG14E2E01-01 通关存档：第三幕、终局链（揭示 / 三波清洗 / 滩头 / 先遣旗舰）记为已完成并写结局账本，经正式结局自动存档入口（EndingService.EndingSaveHandler）落盘
-    /// （从主菜单打到结局由 FGJ-M13 覆盖）；核心旁 36 台 ERC-003 作战队（重炮 / 机枪各半，耐久 5000）、两座维修无人机站 + 维修件（同 FGJ-M13 的 DEBT-FG13E2E01-01）；事件频率“关闭”（事件由 FGJ-M12 覆盖）。
+    /// 结局存档里带着 FGJ-M13 的终局防线夹具（DEBT-FG13E2E01-01：作战队耐久 5000、两座维修无人机站与供电、事件频率“关闭”）；本旅程清洗期间维修站被电网结算改回时再置供电（同一条）。
     /// DEBT-FG14E2E01-02 时间夹具：两次周期清洗之间的 7 个游戏日（3 倍速下每次约 47 分钟，两次超过轻量口径 30 分钟上限）用 GameClock.SkipForTests 跳到发动前 30 游戏秒
     /// （与 FgPostgameSelfCheck 同一做法；7 日节拍本身由 FgPostgameSelfCheck B2 断言“第 504002 / 1008002 步准时”），之后的集结 / 预警 / 来袭 / 交战全部按 3 倍速真实运行；
     /// 沙盒“三个游戏日”同样每日跳到日末前 20 游戏秒、再真实运行 20 游戏秒。
@@ -49,8 +49,8 @@ namespace GameLogic.EditorTools.JourneyBots
         /// <summary>沙盒的自定义种子（玩家在种子框里输入的值，与固定测试种子 42 不同；选有生成器回归基准的旅程种子 1，“种子”一步才能逐块比对基准；B25：内容按种子生成，不依赖坐标）。</summary>
         public const int SandboxSeed = 1;
 
-        private const int SquadSize = 36;
-        private const float SquadHp = 5000f;
+        /// <summary>守家的作战队台数（FGJ-M13 家园作战队 36 台；读档后核心旁凑不够说明交接的结局存档不对）。</summary>
+        private const int MinSquad = 36;
 
         private static readonly string[] Checkpoints = { "pg_intro", "p1_done", "p2_done" };
 
@@ -61,19 +61,15 @@ namespace GameLogic.EditorTools.JourneyBots
             var steps = new List<JourneyStep>
             {
                 S("play", "打开 main.unity 并进入 Play", 90, JourneyCommon.EnterPlay, TickPlay),
-                S("menu_new", "主菜单点“新建”", 150, null, JourneyCommon.TickMenuNew, retries: 1),
-                S("new_game", "存档槽 → 新游戏设置（种子 = 固定测试种子 42，难度标准）→ 点“开始” → 进入归还谷地", 150, null, JourneyCommon.TickNewGame),
+                // ── 1. 真实结局存档 → 继续（DEBT-FG14E2E01-01 的通关存档夹具已删：FG15-QA-01 修复第 1 轮改读 FGJ-M13 打出的结局存档）──
+                S("e_import", "存档目录里放进 FGJ-M13 打到结局时由正式结局自动存档入口写下的那一份（玩家自己的存档；没有 / 代码指纹不同就失败、提示先重跑 FGJ-M13，不退回夹具），等主菜单出来", 90, ApplyImport, TickImport),
+                S("e_load", "主菜单点“读取”，点通关存档的槽位", 20, c => FgjM1Journey.ClickUgui(c, "m_btn_Load"), FgjM1Journey.TickLoadSlot),
+                S("e_loaded", "读档进入归还谷地：结局已达成、还没选“继续”→ 结算重新打开（统计 / 幸存机器 / 纪念墙）；记下守家的作战队（核心旁最近的 36 台 ERC-003，FGJ-M13 的家园作战队）", 120, null, TickLoadedSettlement),
                 S("seed", "种子进了存档；生成结果与该种子的基准一致", 30, null, c => JourneyCommon.TickSeed(c, TestSeed)),
                 S("workers", "记下开局两台机器", 10, null, FgjM3Common.TickWorkers),
-                S("speed3", "按 3 倍速键", 10, c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), FgjM1Journey.TickSpeed3, retries: 1),
-
-                // ── 1. 通关存档 → 继续 ──
-                S("e_fix", $"通关存档夹具（DEBT-FG14E2E01-01）：第三幕、终局链（揭示 / 三波清洗 / 滩头 / 先遣旗舰）记为已完成（从主菜单打到结局由 FGJ-M13 覆盖）；事件频率“关闭”（FGJ-M12 覆盖）；" +
-                              $"核心旁 {SquadSize} 台 ERC-003 作战队（重炮 / 机枪各半，耐久 {SquadHp:0}）、两座维修无人机站 + 维修件（FGJ-M6 覆盖）", 40, ApplyFixture, TickFixture),
-                S("e_save", "结局落盘：写结局账本 → 正式结局自动存档入口（EndingService.EndingSaveHandler）写进当前槽 → 结算面板自动打开、世界暂停、存档被拦", 30, ApplyEnding, TickEndingSaved),
-                S("e_menu", "结算点“返回主菜单”（不存档，结局已落盘）→ 回到主菜单", 60, c => FgjM3Common.Once(c, "esmenu", () => JourneyInput.ClickUitk("[EndingSettlementHost]", "EsMenu")), TickMenuShown),
-                S("e_load", "主菜单点“读取”，点通关存档的槽位", 20, c => FgjM1Journey.ClickUgui(c, "m_btn_Load"), FgjM1Journey.TickLoadSlot),
-                S("e_loaded", "读档进入归还谷地：结局已达成、还没选“继续”→ 结算重新打开（统计 / 幸存机器 / 纪念墙）", 120, null, TickLoadedSettlement),
+                S("e_menu", "结算点“返回主菜单”（不存档，结局已落盘）→ 回到主菜单；磁盘上那一份仍是结局、没进后日谈", 60, c => FgjM3Common.Once(c, "esmenu", () => JourneyInput.ClickUitk("[EndingSettlementHost]", "EsMenu")), TickMenuShown),
+                S("e_load2", "主菜单再点“读取”，点同一个槽位", 20, c => { c.SetInt("slotClicked2", 0); FgjM1Journey.ClickUgui(c, "m_btn_Load"); }, FgjM1Journey.TickLoadSlot),
+                S("e_loaded2", "再次读档：结算照样重新打开（选“继续”之前每次读档都回到结算）", 120, null, TickLoadedSettlement),
                 S("e_continue", "结算点“继续”：进入后日谈、结算关闭、存档允许", 30, null, FgjM13Journey.TickContinue, retries: 2),
                 S("pg_intro", "后日谈说明自动打开（7 日一次、上限 200 台、核心被毁即坚守结束）；顶栏“后日谈 · 第 1 级清洗 7 日后”；点“知道了”", 30, null, TickIntro, retries: 1),
                 S("speed3b", "读档后按 3 倍速键", 10, c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), FgjM1Journey.TickSpeed3, retries: 1),
@@ -89,7 +85,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rec_open", "点“坚守记录”：坚守天数 / 撑过次数 / 最佳单次防守 / 累计，两行清洗历史都写“撑过”", 20, c => FgjM1Journey.ClickUi(c, "[PauseMenuHost]", "PausePostgame"), TickRecord, retries: 1),
                 S("rec_close", "点“关闭”回到暂停菜单", 10, c => FgjM1Journey.ClickUi(c, "[PostgameHost]", "PostgameClose"),
                     c => c.StepElapsed < 0.5 ? StepOutcome.Wait : !PostgamePanelUIToolkit.IsOpen && PauseMenuUIToolkit.IsOpen ? StepOutcome.Done("坚守记录关闭，暂停菜单仍开着") : StepOutcome.Retry("点“关闭”后坚守记录没关：" + FgjM1Journey.UiFail(c)), retries: 1),
-                S("save_quit", "点“保存并返回主菜单”，确认", 15, c => FgjM1Journey.ClickUi(c, "[PauseMenuHost]", "PauseSaveQuit"), FgjM1Journey.TickSaveConfirm),
+                S("save_quit", "点“保存并返回主菜单”（按钮在菜单滚动区下方时先在菜单上滚一下滚轮），确认", 15, null, TickSaveQuit),
                 S("menu_card", "回到主菜单：该槽存档卡写“后日谈 · 坚守 N 天 · 最高 2 级”", 60, null, TickCard),
 
                 // ── 3. 自定义沙盒（关闭突袭）──
@@ -109,7 +105,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 Seed = TestSeed,
                 TotalTimeoutSeconds = 2400,
                 OnFinish = Cleanup,
-                Version = 1,
+                Version = 2, // FG15-QA-01：开局改读 FGJ-M13 的结局存档，旧断点作废
                 CheckpointAfter = Checkpoints,
                 Steps = steps,
             };
@@ -165,132 +161,57 @@ namespace GameLogic.EditorTools.JourneyBots
 
         // ── 1. 通关存档 ────────────────────────────────────────────────────────────
 
-        private static void ApplyFixture(JourneyContext c)
+        private static void ApplyImport(JourneyContext c)
         {
-            CampaignState s = St;
-            if (s == null || c.GetInt("fix.done") == 1)
+            if (c.GetInt("imp.done") == 1)
             {
                 return;
             }
-            c.SetInt("fix.done", 1);
-            long now = GameClock.Ticks;
-            s.Progress.Act = 3;
-            EventDirectorService.SetFrequency(s, EventDirectorService.FrequencyOff);
-            // 终局链记为已完成（各服务按账本 / 自己的完成步判定；先写完成步再写揭示账本，揭示后清洗波次就不会再开始）。
-            PurgeWaveState pw = PurgeWaveService.StateOf(s);
-            pw.StartTick = pw.DoneTick = now;
-            pw.Launched = pw.Cleared = PurgeWaveService.WaveCount;
-            BeachheadService.StateOf(s).DoneTick = now;
-            FlagshipState fs = FlagshipService.StateOf(s);
-            fs.Phase = FlagshipService.PhaseDone;
-            fs.StartTick = fs.DoneTick = now;
-            foreach (string ev in new[] { RevealService.RevealedEventId, PurgeWaveService.ClearedEventId, BeachheadService.ClearedEventId, FlagshipService.DefeatedEventId })
-            {
-                CampaignEventLedger.TryGrant(s, ev, "Endgame", s.PlaySeconds, "fgjm14.fixture");
-            }
-
-            s.UnlockedContentIds = (s.UnlockedContentIds ?? Array.Empty<string>()).Concat(new[] { ComponentCatalog.CompCannonId, ComponentCatalog.CompGunId }).Distinct().ToArray();
-            string bpId = FgjM12Journey.SaveBlueprint(c, "bp.id", "重炮作战", BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompCannonId, null, null, Array.Empty<string>()));
-            string bpGun = FgjM12Journey.SaveBlueprint(c, "bp.gun", "机枪作战", BlueprintCircuitBoard.CreateDefault(HomeValleyLayout.Erc003ChassisId, ComponentCatalog.CompGunId, null, null, Array.Empty<string>()));
-            if (bpId.Length == 0 || bpGun.Length == 0)
-            {
-                c.Set("fix.err", "保存作战蓝图失败：" + c.Get("bp.id.note") + " / " + c.Get("bp.gun.note"));
-                return;
-            }
-            Vector2 core = FgjM8Journey.CorePos;
-            var ids = new List<int>();
-            var used = new List<GridCell>();
-            for (int i = 0; i < SquadSize; i++)
-            {
-                GridCell at = default;
-                for (int tr = i; tr < i + 40; tr++)
-                {
-                    at = SiegeService.NearestPassable(new GridCell(Mathf.RoundToInt(core.x - 9f + (tr % 6) * 3f), Mathf.RoundToInt(core.y - 9f - (tr / 6) * 3f)), 10);
-                    if (!used.Any(x => Math.Abs(x.X - at.X) + Math.Abs(x.Y - at.Y) < 2))
-                    {
-                        break;
-                    }
-                }
-                used.Add(at);
-                int id = FgjM12Journey.SpawnMachine(s, i % 2 == 0 ? bpId : bpGun, new Vector2(at.X, at.Y), SquadHp);
-                if (id > 0)
-                {
-                    ids.Add(id);
-                }
-            }
-            c.Set("roster", string.Join(",", ids.Select(x => x.ToString(CultureInfo.InvariantCulture))));
-
-            var made = new List<string>();
-            for (int i = 0; i < 2; i++)
-            {
-                GridCell? at = FgProductionSelfCheck.FindFree(s, RepairDroneCatalog.StationTypeId, 6f, 14f);
-                if (at.HasValue)
-                {
-                    BuildingRecord b = FgProductionSelfCheck.Built(s, RepairDroneCatalog.StationTypeId, "m14rep" + i, at.Value);
-                    b.Health = BuildingOps.MaxDurability(RepairDroneCatalog.StationTypeId);
-                    Mega.SetPower(b, true);
-                    made.Add(FgjM3Common.Cell(at.Value));
-                }
-            }
-            int kits = HomeInventory.Add(s, BuildingOps.RepairKitId, 200, clampToSpace: false);
-            RepairDroneService.Sync(s);
-            c.Set("def.note", string.Join("、", made) + $"；维修件 +{kits}");
+            c.SetInt("imp.done", 1);
+            bool ok = FgjM13Journey.TryImportEnding(out int slot, out long ticks, out string note);
+            c.SetInt("imp.ok", ok ? 1 : 0);
+            c.Set("imp.note", note);
+            c.SetInt("slot", slot);
+            c.SetLong("end.ticks", ticks);
         }
 
-        private static StepOutcome TickFixture(JourneyContext c)
+        private static StepOutcome TickImport(JourneyContext c)
         {
-            if (c.StepElapsed < 2.5)
+            if (c.GetInt("imp.ok") != 1)
             {
-                return StepOutcome.Wait;
+                return StepOutcome.Fail(c.Get("imp.note"));
             }
-            if (c.Get("fix.err", string.Empty).Length > 0)
+            if (JourneyInput.FindActiveButton("m_btn_Load") == null || c.StepElapsed < 2)
             {
-                return StepOutcome.Fail("夹具：" + c.Get("fix.err"));
+                return c.StepElapsed < 80 ? StepOutcome.Wait : StepOutcome.Fail("主菜单没出来：" + JourneyInput.LastUiFailure);
             }
-            CampaignState s = St;
-            CombatSite home = GameRoot.HomeValley?.Combat;
-            List<int> team = Team(c);
-            bool inKernel = team.Count == SquadSize && team.All(id => home != null && home.TryGetMachineUnit(id, out _));
-            if (!inKernel)
-            {
-                return c.StepElapsed < 12 ? StepOutcome.Wait : StepOutcome.Fail($"夹具后作战队没全进家园内核（{team.Count} 台）");
-            }
-            int stations = Stations().Count;
-            string msg = $"第 {s.Progress.Act} 幕；揭示 {RevealService.Revealed(s)}、清洗 {PurgeWaveService.Done(s)}、滩头 {BeachheadService.Done(s)}、旗舰 {FlagshipService.Done(s)}；事件频率 {EventDirectorService.StateOf(s)?.Frequency}；" +
-                         $"作战队 {team.Count} 台；维修站 {stations} 座（{c.Get("def.note")}）";
-            return stations == 2 && RevealService.Revealed(s) && PurgeWaveService.Done(s) && FlagshipService.Done(s) ? StepOutcome.Done(msg) : StepOutcome.Fail(msg);
+            LoadResult onDisk = CampaignSaveService.Load(c.GetInt("slot"));
+            CampaignState d = onDisk.State;
+            bool ok = onDisk.Success && EndingService.Reached(d) && !d.Progress.IsPostgame && d.RandomSeed == TestSeed;
+            string msg = $"{c.Get("imp.note")}；槽位里：读取 {onDisk.Outcome}、结局 {onDisk.Success && EndingService.Reached(d)}、后日谈 {d?.Progress.IsPostgame}、种子 {d?.RandomSeed}、存档原因 {d?.LastSaveReason}";
+            return ok ? StepOutcome.Done(msg) : StepOutcome.Fail(msg);
         }
 
-        private static void ApplyEnding(JourneyContext c)
+        /// <summary>
+        /// 读入真实结局存档后，后日谈的暂停菜单条目更多（商队 / 事件频率 / 难度等都按存档状态显示），“保存并返回主菜单”落在滚动区可见区下方：
+        /// 像玩家一样先在菜单上滚滚轮把它滚进来再点（FgjM3Common.ClickPanelBodyButton），之后与其它旅程同一条二次确认检查。
+        /// </summary>
+        private static StepOutcome TickSaveQuit(JourneyContext c)
         {
-            CampaignState s = St;
-            if (s == null || c.GetInt("end.done") == 1)
+            if (c.GetInt("sq.clicked") == 0)
             {
-                return;
+                if (!UiConfirmDialog.IsOpen && FgjM3Common.ClickPanelBodyButton("[PauseMenuHost]", "PauseBody", "PauseSaveQuit"))
+                {
+                    c.SetInt("sq.clicked", 1);
+                    c.Set("uiFail", string.Empty);
+                }
+                else
+                {
+                    c.Set("uiFail", JourneyInput.LastUiFailure);
+                }
+                return c.StepElapsed > 5 ? StepOutcome.Fail("点不到“保存并返回主菜单”：" + FgjM1Journey.UiFail(c)) : StepOutcome.Wait;
             }
-            c.SetInt("end.done", 1);
-            CampaignEventLedger.TryGrant(s, EndingService.EndingEventId, "Endgame", s.PlaySeconds, "fgjm14.fixture");
-            SaveResult r = EndingService.EndingSaveHandler(); // 正式结局自动存档入口（结算打开之前写）
-            c.Set("end.save", $"{r.Outcome}（{r.Message}）");
-            c.SetInt("end.ok", r.Success ? 1 : 0);
-            c.SetLong("end.ticks", GameClock.Ticks);
-        }
-
-        private static StepOutcome TickEndingSaved(JourneyContext c)
-        {
-            CampaignState s = St;
-            if (c.GetInt("end.ok") != 1)
-            {
-                return StepOutcome.Fail("结局自动存档失败：" + c.Get("end.save"));
-            }
-            if (!EndingSettlementPanelUIToolkit.IsOpen)
-            {
-                return c.StepElapsed < 20 ? StepOutcome.Wait : StepOutcome.Fail($"结局已达成 {EndingService.Reached(s)}，结算面板 20 秒内没有自动打开");
-            }
-            // 探测：结算打开期间走正式自动存档入口，应被拦（不写盘）；A2 把它登记为探测夹具。
-            SaveResult blocked = CampaignAutoSaveService.SaveAuto(SaveReason.PostgameStart, toast: false);
-            string msg = $"结局账本 {EndingService.Reached(s)}；结局自动存档 {c.Get("end.save")}（槽位 {CampaignSession.ActiveSlotIndex + 1}，第 {c.GetLong("end.ticks")} 步）；结算自动打开、世界暂停 {GameClock.Paused}；结算期间再存档 → {blocked.Outcome}";
-            return blocked.Outcome == SaveOutcome.SettlementOpen && GameClock.Paused ? StepOutcome.Done(msg) : StepOutcome.Fail(msg);
+            return FgjM1Journey.TickSaveConfirm(c);
         }
 
         private static StepOutcome TickMenuShown(JourneyContext c)
@@ -318,9 +239,19 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             CampaignState s = St;
             EndingStats st = EndingService.Stats(s);
+            if (Team(c).Count == 0)
+            {
+                // 作战队 = FGJ-M13 打完终局后守在核心旁的那支（离核心最近的 MinSquad 台活着的 ERC-003；滩头增援 24 台还留在滩头，玩家不用它们守家）。
+                CombatSite home = GameRoot.HomeValley?.Combat;
+                Vector2 core = FgjM8Journey.CorePos;
+                c.Set("roster", string.Join(",", MachineRegistry.AllRecords.Where(m => m != null && m.IsAlive && m.RegionId == HomeValleyLayout.RegionId
+                        && m.ChassisId == HomeValleyLayout.Erc003ChassisId && home != null && home.TryGetMachineUnit(m.LogicId, out _))
+                    .OrderBy(m => Vector2.Distance(FgjM8Journey.PosOf(m.LogicId), core)).ThenBy(m => m.LogicId).Take(MinSquad)
+                    .OrderBy(m => m.LogicId).Select(m => m.LogicId.ToString(CultureInfo.InvariantCulture))));
+            }
             int survivors = Team(c).Count(Alive);
             string msg = $"读档进入归还谷地；结算重新打开（世界暂停 {GameClock.Paused}、存档被拦 {EndingService.BlocksSave(s)}）；统计 归还面积 {st.ReturnedArea}、{st.Days} 天、击退突袭 {st.RaidsRepelled}；幸存机器 {survivors}/{Team(c).Count}";
-            return EndingService.BlocksSave(s) && survivors == SquadSize ? StepOutcome.Done(msg) : StepOutcome.Fail(msg);
+            return EndingService.BlocksSave(s) && survivors >= MinSquad && survivors == Team(c).Count ? StepOutcome.Done(msg) : StepOutcome.Fail(msg);
         }
 
         // ── 2. 后日谈 ──────────────────────────────────────────────────────────────
@@ -440,7 +371,7 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 if (b.PowerState != BuildingPowerState.Powered)
                 {
-                    Mega.SetPower(b, true); // 供电夹具（DEBT-FG14E2E01-01，同 FGJ-M13）
+                    Mega.SetPower(b, true); // 供电夹具（结局存档里 FGJ-M13 的维修站，DEBT-FG13E2E01-01）
                     c.SetInt("def.reassert", c.GetInt("def.reassert") + 1);
                 }
             }

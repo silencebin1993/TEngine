@@ -61,6 +61,9 @@ namespace GameLogic.EditorTools.JourneyBots
         private const string Prefix = "BinGames.Journey.";
         private static JourneyRunner _runner;
 
+        /// <summary>本次是按 --allow-code-change 从旧代码断点续跑的（断点里的世界是旧代码跑出来的）。交接存档要如实写明（FG15-QA-01）。</summary>
+        internal static bool ResumedWithOldCode => SessionState.GetString(Prefix + "CodeWarning", string.Empty).Length > 0;
+
         static JourneyBotHost()
         {
             string id = SessionState.GetString(Prefix + "Id", string.Empty);

@@ -1033,7 +1033,11 @@ namespace GameLogic.Campaign.Defense
             ReleaseTrapConsumer(r);
             if (b != null)
             {
-                RaidResultService.NoteLoss(state, RaidResultService.KindDefense, b.BuildingId, b.Position, site.DamageSourceOf(e.Other, state)); // FG6-DEF-08：突袭结算的损失（FG11-RAID-01：记来源）
+                // DEBT-FG15QA01-04：建筑已经被正式伤害入口（BuildingOps）摧毁、记过损失，内核单位还没对账移除时不重复记。
+                if (IsBuilt(b))
+                {
+                    RaidResultService.NoteLoss(state, RaidResultService.KindDefense, b.BuildingId, b.Position, site.DamageSourceOf(e.Other, state)); // FG6-DEF-08：突袭结算的损失（FG11-RAID-01：记来源）
+                }
                 DestroyBuilding(state, b);
                 if (DefenseCatalog.BlocksMovement(b.BuildingTypeId))
                 {

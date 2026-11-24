@@ -909,6 +909,21 @@ namespace GameLogic.Campaign.Defense
         }
 
         /// <summary>
+        /// FG15-QA-01（DEBT-FG15QA01-04）：建筑经 <see cref="Economy.BuildingOps.ApplyDamage(CampaignState, string, float, bool, int)"/> 被摧毁（物质斑块烧蚀 / 天气 / 蠕虫 / 轨道投放，
+        /// 不经内核结构单位阵亡）也记一处损失，与内核阵亡同一口径（炮塔 / 防御建筑 / 普通建筑分类）；来源 = 斑块归属的单位（<paramref name="attacker"/> = 0 → field）。只在摧毁时调用，O(1)。
+        /// </summary>
+        public static void NoteBuildingDestroyed(CampaignState s, BuildingRecord b, int attacker)
+        {
+            if (b == null)
+            {
+                return;
+            }
+            string kind = TurretService.IsTurret(b) ? KindTurret : DefenseService.IsDefense(b) ? KindDefense : KindBuilding;
+            CombatSite site = HomeSite;
+            NoteLoss(s, kind, b.BuildingId, b.Position, site != null && !site.IsDisposed ? site.DamageSourceOf(attacker, s) : "field");
+        }
+
+        /// <summary>
         /// FG10-RAID-01（“再污染在离家报告里说明”）：灭活无人机投放落地、家园的格子真的再污染之后（<see cref="ClarityRaidService.OnRepolluted"/> 调用）：
         /// 记到投放者所属队伍（<paramref name="groupKey"/> = 内核攻城队伍键）那一份进行中的结算，找不到再退回最早展开的那一份（次数 / 格数 / 受污染建筑数，第一次的落点），
         /// 并记一条可定位的过程。没有进行中的结算（攻城外的投放）时不记，返回 false。O(队伍数)。

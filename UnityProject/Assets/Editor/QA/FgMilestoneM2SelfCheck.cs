@@ -582,6 +582,13 @@ namespace GameLogic.EditorTools
 
         // ── C. 旅程登记 ────────────────────────────────────────────────────────────
 
+        internal static readonly (string Kind, string[] Ids)[] ReverseSteps =
+        {
+            ("资源不足", new[] { "r1_nopower", "r1_power", "r1_wet_ok", "r1_notech" }), ("路径失败", new[] { "r2_bad", "r2_ok" }),
+            ("暂停", new[] { "r3_order", "r3_frozen", "r3_resume2" }), ("目标死亡", new[] { "r4_dead", "r4_regen", "r4_again" }),
+            ("存读档", new[] { "r5_menu", "r5_loaded", "r5_again" }), ("断网 / 失联", new[] { "r6_jam", "r6_attack", "r6_out" }),
+        };
+
         private static void CheckJourneyCatalog()
         {
             Line("  · C. 旅程登记：FGJ-M2 覆盖出口旅程 4 步；FGJ-M2R 覆盖 IC-REQ-022 六类（每类出错 → 恢复两端）；种子不同");
@@ -598,12 +605,7 @@ namespace GameLogic.EditorTools
             List<string> missing = exit.Where(x => m2 == null || m2.Steps.All(s => s.Id != x.Id)).Select(x => x.Step).ToList();
             Expect(Wellformed(m2) && missing.Count == 0 && m2.Seed == FgjM2Journey.TestSeed,
                 $"FGJ-M2：{m2?.Steps.Count} 步、步骤 ID 不重复、每步有超时与检查、固定种子 {m2?.Seed}；出口旅程各步都有对应步骤{(missing.Count == 0 ? string.Empty : "，缺：" + string.Join("、", missing))}");
-            var reverse = new (string Kind, string[] Ids)[]
-            {
-                ("资源不足", new[] { "r1_nopower", "r1_power", "r1_wet_ok", "r1_notech" }), ("路径失败", new[] { "r2_bad", "r2_ok" }),
-                ("暂停", new[] { "r3_order", "r3_frozen", "r3_resume2" }), ("目标死亡", new[] { "r4_dead", "r4_regen", "r4_again" }),
-                ("存读档", new[] { "r5_menu", "r5_loaded", "r5_again" }), ("断网 / 失联", new[] { "r6_jam", "r6_attack", "r6_out" }),
-            };
+            var reverse = ReverseSteps;
             List<string> missingR = reverse.Where(x => m2r == null || x.Ids.Any(id => m2r.Steps.All(s => s.Id != id))).Select(x => x.Kind).ToList();
             Expect(Wellformed(m2r) && missingR.Count == 0 && m2r.Seed != m2.Seed && m2r.Steps.Any(x => x.Id == "r1_cancel"),
                 $"FGJ-M2R：{m2r?.Steps.Count} 步；六类反向场景齐全{(missingR.Count == 0 ? string.Empty : "，缺：" + string.Join("、", missingR))}（另有确认框取消）；种子 {m2r?.Seed} ≠ {m2?.Seed}（B25）");

@@ -500,7 +500,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 {
                     string g2 = HomeValleyLayout.BuildingTypeGenerator2;
                     int per = Math.Max(1, P.BuildingSupply(g2));
-                    int demand = P.BuildingDemand(Turret) * 2 + P.BuildingDemand(Trap) + P.BuildingDemand("recycler");
+                    int demand = P.BuildingDemand(Turret) * 2 + P.BuildingDemand(Trap) + P.BuildingDemand("recycler") + P.BuildingDemand(Lab);
                     foreach (BuildingRecord b in s.BuildingRecords ?? Array.Empty<BuildingRecord>())
                     {
                         if (b != null && b.RegionId == HomeValleyLayout.RegionId)
@@ -521,6 +521,27 @@ namespace GameLogic.EditorTools.JourneyBots
                         }
                         cand.Plan.Generators.Add(gg);
                         M.ReserveIn(cand.Plan, g2, gg, 0);
+                    }
+                }
+                // FG15-QA-01（DEBT-FG6E2E01-02）：屏障 / 陷阱由仿真实验室真实研究——实验室也放在圈里（圈外不多一个突袭目标，各波的目标选择不变）。
+                if (turrets)
+                {
+                    bool lab = false;
+                    foreach (float deg in new[] { 270f, 90f })
+                    {
+                        Vector2 want = cc + new Vector2(Mathf.Cos(deg * Mathf.Deg2Rad), Mathf.Sin(deg * Mathf.Deg2Rad)) * (half + m * 0.5f);
+                        if (FindInside(s, cand.Plan, Lab, want, cmin, cmax, m, out GridCell lg))
+                        {
+                            cand.Plan.Buildings.Add(new P.Placed { Key = "rlab", Type = Lab, Pivot = lg, Rot = 0, Label = Name(Lab) });
+                            M.ReserveIn(cand.Plan, Lab, lg, 0);
+                            lab = true;
+                            break;
+                        }
+                    }
+                    if (!lab)
+                    {
+                        turrets = false;
+                        lastWhy = $"外框外 {m} 格那一圈里放不下仿真实验室";
                     }
                 }
                 if (turrets)
@@ -902,9 +923,13 @@ namespace GameLogic.EditorTools.JourneyBots
 
         /// <summary>
         /// FG6-E2E-01 修复轮（承接 DEBT-FG5E2E01-05 进旅程）：电路合成台放在屏障圈外、离突袭抵达点（<paramref name="arrival"/>）最近、在归还核心配电范围里的空地上——
-        /// 突袭部队在抵达点展开，够不着圈里的核心，按职能偏好先打最近的其它建筑（FGR-DEF-030）。离闸门至少 3 格（不挡机器进出）。失败返回 null 与原因。
+        /// 突袭部队在抵达点展开，屏障圈完整时开路场走不到圈里的核心 / 发电机，就带它们去圈外离得最近的建筑（FGR-DEF-030 / 031，CombatSiege.RoleTarget；
+        /// 圈上有残血墙会先被打穿，所以 FGJ-M6R 第三波之前 rs_ring 把圈修满）。离闸门至少 3 格（不挡机器进出）。失败返回 null 与原因。
         /// </summary>
-        internal static GridCell? PlanSynthNear(CampaignState s, string synthType, Vector2 arrival, int ringMargin, GridCell gate, out string why)
+        /// <remarks>FG15-QA-01（FGJ-M6R fu_rolled 整包两次失败的根因）：<paramref name="raiderNearest"/> = true 时另要求合成台对每个展开位（<see cref="SpawnSlots"/>）
+        /// 都比圈外其它建筑至少近 <see cref="RaiderMarginCells"/> 格——圈外建筑对三种职能的偏好代价相同（“其它”类 120 米），突击型去哪座只看路程；
+        /// 只按“离抵达点最近”放时，突击型落在展开阵最外圈（集结点旁的格被合成台占了）就离装配站 / 解析台更近，合成台只被流弹慢慢打掉。</remarks>
+        internal static GridCell? PlanSynthNear(CampaignState s, string synthType, Vector2 arrival, int ringMargin, GridCell gate, out string why, bool raiderNearest = false)
         {
             why = null;
             HomeGridService.TryGetCoreBounds(s, out GridCell cmin, out GridCell cmax);
@@ -912,6 +937,10 @@ namespace GameLogic.EditorTools.JourneyBots
             float coreR = HomeValleyPowerGrid.CoverRadiusOf(HomeValleyLayout.BuildingTypeCore);
             HashSet<long> avoid = P.BaseAvoid(s);
             var at = new GridCell(Mathf.RoundToInt(arrival.x), Mathf.RoundToInt(arrival.y));
+            GridCell gather = SiegeService.NearestPassable(at, 12);
+            List<GridCell> rivals = raiderNearest ? RivalCells(s, gather, cmin, cmax, ringMargin) : null;
+            float bestMargin = float.MinValue;
+            GridCell? bestMarginPivot = null;
             GridCell? best = null;
             float bestD = float.MaxValue;
             int tried = 0;
@@ -936,18 +965,124 @@ namespace GameLogic.EditorTools.JourneyBots
                     }
                     tried++;
                     float d = Vector2.Distance(center, arrival);
-                    if (d < bestD && P.Placeable(s, synthType, pivot, 0, avoid))
+                    if (d >= bestD || !P.Placeable(s, synthType, pivot, 0, avoid))
                     {
-                        bestD = d;
-                        best = pivot;
+                        continue;
                     }
+                    if (raiderNearest)
+                    {
+                        if (fp.Any(c => c.X == gather.X && c.Y == gather.Y))
+                        {
+                            continue; // 不占集结点（占了集结点会挪，展开位跟着变）
+                        }
+                        float margin = RaiderMargin(fp, gather, rivals);
+                        if (margin > bestMargin)
+                        {
+                            bestMargin = margin;
+                            bestMarginPivot = pivot;
+                        }
+                        if (margin < RaiderMarginCells)
+                        {
+                            continue;
+                        }
+                    }
+                    bestD = d;
+                    best = pivot;
                 }
             }
             if (best == null)
             {
-                why = $"抵达点 {arrival} 附近（屏障圈外、核心配电范围里）放不下{Name(synthType)}（看过 {tried} 个位置）";
+                why = $"抵达点 {arrival} 附近（屏障圈外、核心配电范围里{(raiderNearest ? $"、对集结点 {Cell(gather)} 的前 {SpawnSlotsChecked} 个展开位都比圈外其它建筑近 {RaiderMarginCells} 格以上" : string.Empty)}）放不下{Name(synthType)}（看过 {tried} 个位置" +
+                      (raiderNearest ? $"；最好的 {(bestMarginPivot.HasValue ? Cell(bestMarginPivot.Value) : "无")} 只近 {bestMargin:F1} 格，圈外建筑格 {rivals.Count} 个" : string.Empty) + "）";
             }
             return best;
+        }
+
+        /// <summary>
+        /// FG15-QA-01：看前几个展开位。第三波（2 级 9 台）编成按单位表顺序是 4 台破坏型 → 1 台突击型 → 4 台攻城型（整包 run3 / run4 实测），会去拆圈外“其它”类建筑的只有突击型（第 5 台）；
+        /// 破坏型站定打射程内的发电机、攻城型打屏障。看前 6 个（多 1 个余量）；12 个时圈外装配站 / 解析台离外圈太近，找不到位置（实测最好只近 -0.2 格）。编成变了 fu_target 会照实失败。
+        /// </summary>
+        internal const int SpawnSlotsChecked = 6;
+
+        /// <summary>FG15-QA-01：合成台要比圈外其它建筑至少近这么多格（流场 8 向步长 10 / 14，1 格 = 代价 10，不赌并列）。</summary>
+        internal const float RaiderMarginCells = 1f;
+
+        private static float Octile(int dx, int dy)
+        {
+            dx = Math.Abs(dx);
+            dy = Math.Abs(dy);
+            return Math.Max(dx, dy) + 0.41421356f * Math.Min(dx, dy);
+        }
+
+        /// <summary>
+        /// 展开位：与 SiegeService.SpawnUnits 同一顺序——集结点起一圈圈往外（间距 siege.spawn_spacing 取整）、敌方此刻可通行的格；<paramref name="blocked"/>（要放的合成台）占的格跳过。取前 <see cref="SpawnSlotsChecked"/> 个。
+        /// </summary>
+        internal static List<GridCell> SpawnSlots(GridCell gather, ICollection<GridCell> blocked)
+        {
+            int step = Math.Max(1, Mathf.RoundToInt(SiegeCatalog.SpawnSpacing));
+            var slots = new List<GridCell>(SpawnSlotsChecked);
+            for (int ring = 0; ring <= 48 && slots.Count < SpawnSlotsChecked; ring++)
+            {
+                for (int dy = -ring; dy <= ring && slots.Count < SpawnSlotsChecked; dy++)
+                {
+                    for (int dx = -ring; dx <= ring && slots.Count < SpawnSlotsChecked; dx++)
+                    {
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) != ring)
+                        {
+                            continue;
+                        }
+                        var cell = new GridCell(gather.X + dx * step, gather.Y + dy * step);
+                        if (blocked.Contains(cell) || !GameLogic.Campaign.Nav.NavService.PassableNow(cell.X, cell.Y, BinGames.Sim.Nav.NavConst.ClassHostile))
+                        {
+                            continue;
+                        }
+                        slots.Add(cell);
+                    }
+                }
+            }
+            return slots;
+        }
+
+        /// <summary>集结点 24 格内、屏障圈外的建筑占地格（不管状态：废墟 / 虚影到第三波前也可能修好、建成——宁严勿松）。</summary>
+        private static List<GridCell> RivalCells(CampaignState s, GridCell gather, GridCell cmin, GridCell cmax, int ringMargin)
+        {
+            var list = new List<GridCell>(128);
+            HomeGridMap map = HomeGridService.BoundMap(s);
+            if (map == null)
+            {
+                return list;
+            }
+            for (int y = gather.Y - 24; y <= gather.Y + 24; y++)
+            {
+                for (int x = gather.X - 24; x <= gather.X + 24; x++)
+                {
+                    if (x >= cmin.X - ringMargin - 1 && x <= cmax.X + ringMargin + 1 && y >= cmin.Y - ringMargin - 1 && y <= cmax.Y + ringMargin + 1)
+                    {
+                        continue;
+                    }
+                    var cell = new GridCell(x, y);
+                    string occ = map.OccupantAt(cell);
+                    BuildingRecord b = string.IsNullOrEmpty(occ) ? null : HomeGridService.FindBuilding(s, occ);
+                    if (b != null && b.RegionId == HomeValleyLayout.RegionId && !HomeGridService.IsRelocationGhost(b))
+                    {
+                        list.Add(cell);
+                    }
+                }
+            }
+            return list;
+        }
+
+        /// <summary>合成台占地 <paramref name="fp"/> 对每个展开位比最近的圈外其它建筑近多少格（取最小；没有其它建筑 = 很大）。</summary>
+        private static float RaiderMargin(List<GridCell> fp, GridCell gather, List<GridCell> rivals)
+        {
+            float worst = float.MaxValue;
+            foreach (GridCell slot in SpawnSlots(gather, fp))
+            {
+                float mine = fp.Min(c => Octile(c.X - slot.X, c.Y - slot.Y));
+                float other = rivals.Count == 0 ? 99f : rivals.Min(c => Octile(c.X - slot.X, c.Y - slot.Y));
+                worst = Math.Min(worst, other - mine);
+            }
+            return worst;
         }
 
         /// <summary>地下管线口 T1（建造栏“物流”分类；一对口跨度以内自动配对，从屏障底下穿过去）。</summary>

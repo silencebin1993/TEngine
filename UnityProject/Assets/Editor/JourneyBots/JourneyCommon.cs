@@ -160,7 +160,11 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             if (!showing)
             {
-                return c.StepElapsed > 30 ? StepOutcome.Fail("有待播的演出，但 30 秒内播放器没有接管画面") : StepOutcome.Wait;
+                // FG15-QA-01：失败时写明播放器不开播的是哪个条件（NarrativeCutscenePlayerUIToolkit.Tick：界面已载入、世界已载入、没有确认框、没有面板模态）
+                return c.StepElapsed > 30
+                    ? StepOutcome.Fail($"有待播的演出，但 30 秒内播放器没有接管画面（播放器 {(UI.Kit.NarrativeCutscenePlayerUIToolkit.Instance != null ? "在" : "不在")}、界面已载入 {UI.Kit.NarrativeCutscenePlayerUIToolkit.RootLoaded}、" +
+                                       $"世界已载入 {Stage.GameRoot.AnyRegionActive}、确认框 {UI.Kit.UiConfirmDialog.IsOpen}、面板模态 {InputRouter.PanelModalOpen}（{InputRouter.PanelModalOwnersForDiagnostics}）、正在播 {Narrative.NarrativeService.Playing != null}）")
+                    : StepOutcome.Wait;
             }
             if (UI.Kit.UiConfirmDialog.IsOpen)
             {

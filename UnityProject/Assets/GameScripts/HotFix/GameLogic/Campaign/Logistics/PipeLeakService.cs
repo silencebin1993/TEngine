@@ -593,7 +593,7 @@ namespace GameLogic.Campaign.Logistics
             foreach (int key in AreaKeys)
             {
                 EmgStructHit h = AreaHits[key];
-                int hurt = BurnArea(state, new GridCell(Mathf.RoundToInt((float)h.Pos.x), Mathf.RoundToInt((float)h.Pos.y)), h.Radius, h.Damage, skipTurrets: true);
+                int hurt = BurnArea(state, new GridCell(Mathf.RoundToInt((float)h.Pos.x), Mathf.RoundToInt((float)h.Pos.y)), h.Radius, h.Damage, skipTurrets: true, by: h.By);
                 AreaBurns++;
                 if (hurt > 0 && h.By != 0)
                 {
@@ -808,7 +808,7 @@ namespace GameLogic.Campaign.Logistics
 
         /// <summary>一圈里的管线、传送带、建筑各扣 <paramref name="dmg"/>（建筑本次对账只扣一次）。O(半径内格数)。
         /// <paramref name="skipTurrets"/> = 物质斑块条目：炮塔血量在内核、已由内核斑块接触结算（ADR ⑤），这里不再扣（液洼残留是中立区域，内核跳过炮塔，仍由这里扣）。</summary>
-        private static int BurnArea(CampaignState state, GridCell center, float radius, float dmg, bool skipTurrets = false)
+        private static int BurnArea(CampaignState state, GridCell center, float radius, float dmg, bool skipTurrets = false, int by = 0)
         {
             int hurt = 0; // EMG4-CODEX-01：返回本次扣了血的管线 / 传送带 / 建筑处数（友伤通知用）
             if (dmg <= 0f || !(radius > 0f))
@@ -850,7 +850,7 @@ namespace GameLogic.Campaign.Logistics
                         }
                         else if (b != null && !HomeValleyController.IsPlannedGhost(b))
                         {
-                            BuildingOps.ApplyDamage(state, occ, dmg);
+                            BuildingOps.ApplyDamage(state, occ, dmg, notify: true, attacker: by); // by = 斑块归属（突袭结算损失的来源，DEBT-FG15QA01-04）
                             FireHits++;
                             hurt++;
                         }

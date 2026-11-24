@@ -206,41 +206,43 @@ namespace GameLogic.EditorTools
 
         // ── R. IC-REQ-022 反向场景 ─────────────────────────────────────────────────
 
+        internal static readonly (string Category, string Segment, string File, string Label)[] ReverseMap =
+        {
+            ("R1 条件不足：交易材料不足 → 买不了、不改任何状态", "FgCaravanSelfCheck", "FgCaravanSelfCheck.cs", "N1 材料不足：买不了、不改任何状态"),
+            ("R1 条件不足：没有标记器 / 不在扫描半径里 → 不识别诱饵", "FgDecoyTerminalSelfCheck", "FgDecoyTerminalSelfCheck.cs", "N5 负向：没有标记器的机器站在旁边不识别"),
+            ("R1 条件不足：事件频率设为关闭 → 只留剧情固定与点位事件", "FgEventDirectorSelfCheck", "FgEventDirectorSelfCheck.cs", "R3 负向“事件频率设为关闭”"),
+            ("R1 条件不足：80 警告后提取钻全部关停 → 到点照常请求", "FgWormSelfCheck", "FgWormSelfCheck.cs", "C8 负向“80 警告后把提取钻全部关停”"),
+            ("R2 目标死亡：蠕虫分节击毁 → 每节掉落、整条倒下", "FgWormSelfCheck", "FgWormSelfCheck.cs", "C5 分节击毁"),
+            ("R2 目标死亡：被夺控的己方机器被打到 0 → 瘫痪而不阵亡", "FgSignalGhostSelfCheck", "FgSignalGhostSelfCheck.cs", "C1 击倒（FGR-EVT-022"),
+            ("R2 目标死亡：预警中目标全部失效 → 剧情第一次撤回成推迟", "FgSignalGhostSelfCheck", "FgSignalGhostSelfCheck.cs", "E2 预警中目标全部失效"),
+            ("R2 目标死亡 / 失败：没打退诱饵伏击 → 时限到以超时结束", "FgDecoyTerminalSelfCheck", "FgDecoyTerminalSelfCheck.cs", "N2 负向“没打退伏击”"),
+            ("R3 失联：远征里的机器被夺控，在干扰场里 / 覆盖外按接入键被拒，回覆盖内夺回", "FgSignalGhostSelfCheck", "FgSignalGhostSelfCheck.cs", "B2 负向“选中的机器在远征”"),
+            ("R3 失联：没瘫痪的被夺控机器离开地点 → 归还并通知", "FgSignalGhostSelfCheck", "FgSignalGhostSelfCheck.cs", "G2 没瘫痪的被夺控机器离开地点"),
+            ("R3 失联：预警中家园被卸载 → 撞击照常结算、不崩溃", "FgOrbitalDropSelfCheck", "FgOrbitalDropSelfCheck.cs", "S3 家园未载入时撞击"),
+            ("R4 暂停与倍速：事件导演", "FgEventDirectorSelfCheck", "FgEventDirectorSelfCheck.cs", "T1 暂停与 0.5x～3x"),
+            ("R4 暂停与倍速：震动与蠕虫", "FgWormSelfCheck", "FgWormSelfCheck.cs", "T1 暂停与 0.5x～3x"),
+            ("R4 暂停与倍速：信号幽灵预警 / 夺控", "FgSignalGhostSelfCheck", "FgSignalGhostSelfCheck.cs", "T1 暂停与 0.5x～3x"),
+            ("R4 暂停与倍速：轨道坠落预警 / 撞击", "FgOrbitalDropSelfCheck", "FgOrbitalDropSelfCheck.cs", "T1 暂停与 0.5x～3x"),
+            ("R4 暂停与倍速：诱饵触发与伏击", "FgDecoyTerminalSelfCheck", "FgDecoyTerminalSelfCheck.cs", "T1 暂停与 0.5x～3x"),
+            ("R4 暂停与倍速：商队到达与停留", "FgCaravanSelfCheck", "FgCaravanSelfCheck.cs", "T1 暂停与 0.5x～3x"),
+            ("R5 存读档（FGT-EVT-009）：事件导演状态（排程、进行中、历史、随机数种子与序号、首次说明、频率）", "FgEventDirectorSelfCheck", "FgEventDirectorSelfCheck.cs", "S1 负向“事件进行中存档”：预警中真文件存档"),
+            ("R5 存读档（FGT-EVT-009）：各地点震动值、蠕虫记录与内核蠕虫节", "FgWormSelfCheck", "FgWormSelfCheck.cs", "S1 负向“事件进行中存档”：蠕虫在地面上"),
+            ("R5 存读档（FGT-EVT-009）：信号幽灵预警与内核夺控", "FgSignalGhostSelfCheck", "FgSignalGhostSelfCheck.cs", "负向“事件进行中存档”——预警中（还剩 3 秒）"),
+            ("R5 存读档（FGT-EVT-009）：轨道坠落预警中", "FgOrbitalDropSelfCheck", "FgOrbitalDropSelfCheck.cs", "S1 负向“事件进行中存档”——预警中（还剩 30 秒）"),
+            ("R5 存读档（FGT-EVT-009）：撞击后坠落残骸", "FgOrbitalDropSelfCheck", "FgOrbitalDropSelfCheck.cs", "S2 撞击后存档 → 读档"),
+            ("R5 存读档（FGT-EVT-009）：诱饵伏击进行中", "FgDecoyTerminalSelfCheck", "FgDecoyTerminalSelfCheck.cs", "S1 伏击进行中真文件存读档"),
+            ("R5 存读档（FGT-EVT-009）：商队停留中、商品与库存", "FgCaravanSelfCheck", "FgCaravanSelfCheck.cs", "S1 负向“事件进行中存档”——商队停留中"),
+            ("R6 路径 / 地点失败：处理器找不到合适地点 → 随机 / 条件放弃这次、剧情与点位留着再试", "FgEventDirectorSelfCheck", "FgEventDirectorSelfCheck.cs", "F7 没有处理器的事件不安排"),
+            ("R6 路径 / 地点失败：落点是悬崖 / 水面 → 改选可走落点", "FgOrbitalDropSelfCheck", "FgOrbitalDropSelfCheck.cs", "A2b 负向：悬崖 / 水面格"),
+            ("R6 路径 / 地点失败：请求落在核心旁 → 改到 12 格外", "FgOrbitalDropSelfCheck", "FgOrbitalDropSelfCheck.cs", "A2 负向：请求落在核心旁 2 格"),
+            ("R6 路径 / 地点失败：商队从迷雾外走到停靠点", "FgCaravanSelfCheck", "FgCaravanSelfCheck.cs", "N4b FGR-EVT-050“从迷雾外来"),
+        };
+
         private static void CheckReverseScenarios()
         {
             Line("  · R. IC-REQ-022 六类反向（事件段）：每类至少一条起真实系统的断言仍在源码里、所在段登记在全量自检；R5 = FGT-EVT-009 六个事件各一条存读档；里程碑风险“事件没有预警或不可应对”；承接项各有断言");
             var segments = new HashSet<string>(CellFrameworkValidate.SegmentNames, StringComparer.Ordinal);
-            var map = new (string Category, string Segment, string File, string Label)[]
-            {
-                ("R1 条件不足：交易材料不足 → 买不了、不改任何状态", "FgCaravanSelfCheck", "FgCaravanSelfCheck.cs", "N1 材料不足：买不了、不改任何状态"),
-                ("R1 条件不足：没有标记器 / 不在扫描半径里 → 不识别诱饵", "FgDecoyTerminalSelfCheck", "FgDecoyTerminalSelfCheck.cs", "N5 负向：没有标记器的机器站在旁边不识别"),
-                ("R1 条件不足：事件频率设为关闭 → 只留剧情固定与点位事件", "FgEventDirectorSelfCheck", "FgEventDirectorSelfCheck.cs", "R3 负向“事件频率设为关闭”"),
-                ("R1 条件不足：80 警告后提取钻全部关停 → 到点照常请求", "FgWormSelfCheck", "FgWormSelfCheck.cs", "C8 负向“80 警告后把提取钻全部关停”"),
-                ("R2 目标死亡：蠕虫分节击毁 → 每节掉落、整条倒下", "FgWormSelfCheck", "FgWormSelfCheck.cs", "C5 分节击毁"),
-                ("R2 目标死亡：被夺控的己方机器被打到 0 → 瘫痪而不阵亡", "FgSignalGhostSelfCheck", "FgSignalGhostSelfCheck.cs", "C1 击倒（FGR-EVT-022"),
-                ("R2 目标死亡：预警中目标全部失效 → 剧情第一次撤回成推迟", "FgSignalGhostSelfCheck", "FgSignalGhostSelfCheck.cs", "E2 预警中目标全部失效"),
-                ("R2 目标死亡 / 失败：没打退诱饵伏击 → 时限到以超时结束", "FgDecoyTerminalSelfCheck", "FgDecoyTerminalSelfCheck.cs", "N2 负向“没打退伏击”"),
-                ("R3 失联：远征里的机器被夺控，在干扰场里 / 覆盖外按接入键被拒，回覆盖内夺回", "FgSignalGhostSelfCheck", "FgSignalGhostSelfCheck.cs", "B2 负向“选中的机器在远征”"),
-                ("R3 失联：没瘫痪的被夺控机器离开地点 → 归还并通知", "FgSignalGhostSelfCheck", "FgSignalGhostSelfCheck.cs", "G2 没瘫痪的被夺控机器离开地点"),
-                ("R3 失联：预警中家园被卸载 → 撞击照常结算、不崩溃", "FgOrbitalDropSelfCheck", "FgOrbitalDropSelfCheck.cs", "S3 家园未载入时撞击"),
-                ("R4 暂停与倍速：事件导演", "FgEventDirectorSelfCheck", "FgEventDirectorSelfCheck.cs", "T1 暂停与 0.5x～3x"),
-                ("R4 暂停与倍速：震动与蠕虫", "FgWormSelfCheck", "FgWormSelfCheck.cs", "T1 暂停与 0.5x～3x"),
-                ("R4 暂停与倍速：信号幽灵预警 / 夺控", "FgSignalGhostSelfCheck", "FgSignalGhostSelfCheck.cs", "T1 暂停与 0.5x～3x"),
-                ("R4 暂停与倍速：轨道坠落预警 / 撞击", "FgOrbitalDropSelfCheck", "FgOrbitalDropSelfCheck.cs", "T1 暂停与 0.5x～3x"),
-                ("R4 暂停与倍速：诱饵触发与伏击", "FgDecoyTerminalSelfCheck", "FgDecoyTerminalSelfCheck.cs", "T1 暂停与 0.5x～3x"),
-                ("R4 暂停与倍速：商队到达与停留", "FgCaravanSelfCheck", "FgCaravanSelfCheck.cs", "T1 暂停与 0.5x～3x"),
-                ("R5 存读档（FGT-EVT-009）：事件导演状态（排程、进行中、历史、随机数种子与序号、首次说明、频率）", "FgEventDirectorSelfCheck", "FgEventDirectorSelfCheck.cs", "S1 负向“事件进行中存档”：预警中真文件存档"),
-                ("R5 存读档（FGT-EVT-009）：各地点震动值、蠕虫记录与内核蠕虫节", "FgWormSelfCheck", "FgWormSelfCheck.cs", "S1 负向“事件进行中存档”：蠕虫在地面上"),
-                ("R5 存读档（FGT-EVT-009）：信号幽灵预警与内核夺控", "FgSignalGhostSelfCheck", "FgSignalGhostSelfCheck.cs", "负向“事件进行中存档”——预警中（还剩 3 秒）"),
-                ("R5 存读档（FGT-EVT-009）：轨道坠落预警中", "FgOrbitalDropSelfCheck", "FgOrbitalDropSelfCheck.cs", "S1 负向“事件进行中存档”——预警中（还剩 30 秒）"),
-                ("R5 存读档（FGT-EVT-009）：撞击后坠落残骸", "FgOrbitalDropSelfCheck", "FgOrbitalDropSelfCheck.cs", "S2 撞击后存档 → 读档"),
-                ("R5 存读档（FGT-EVT-009）：诱饵伏击进行中", "FgDecoyTerminalSelfCheck", "FgDecoyTerminalSelfCheck.cs", "S1 伏击进行中真文件存读档"),
-                ("R5 存读档（FGT-EVT-009）：商队停留中、商品与库存", "FgCaravanSelfCheck", "FgCaravanSelfCheck.cs", "S1 负向“事件进行中存档”——商队停留中"),
-                ("R6 路径 / 地点失败：处理器找不到合适地点 → 随机 / 条件放弃这次、剧情与点位留着再试", "FgEventDirectorSelfCheck", "FgEventDirectorSelfCheck.cs", "F7 没有处理器的事件不安排"),
-                ("R6 路径 / 地点失败：落点是悬崖 / 水面 → 改选可走落点", "FgOrbitalDropSelfCheck", "FgOrbitalDropSelfCheck.cs", "A2b 负向：悬崖 / 水面格"),
-                ("R6 路径 / 地点失败：请求落在核心旁 → 改到 12 格外", "FgOrbitalDropSelfCheck", "FgOrbitalDropSelfCheck.cs", "A2 负向：请求落在核心旁 2 格"),
-                ("R6 路径 / 地点失败：商队从迷雾外走到停靠点", "FgCaravanSelfCheck", "FgCaravanSelfCheck.cs", "N4b FGR-EVT-050“从迷雾外来"),
-            };
+            var map = ReverseMap;
             var bad = new List<string>();
             var cats = new HashSet<string>(StringComparer.Ordinal);
             foreach ((string category, string segment, string file, string label) in map)

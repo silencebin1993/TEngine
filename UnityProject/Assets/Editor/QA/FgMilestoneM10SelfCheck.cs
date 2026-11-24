@@ -192,30 +192,32 @@ namespace GameLogic.EditorTools
 
         // ── R. IC-REQ-022 反向场景 ─────────────────────────────────────────────────
 
+        internal static readonly (string Category, string Segment, string File, string Label)[] ReverseMap =
+        {
+            ("R1 条件不足：没有防腐涂层时往湖心下令 → 拒绝并说明蓝图来源", "FgSettlingLakeSelfCheck", "FgSettlingLakeSelfCheck.cs", "C2 负向（卡片“没有防腐涂层时尝试进入”）"),
+            ("R1 资源不足：没有净化塔覆盖的污染 → 路径写“在附近放一座净化塔”", "FgClarityRaidSelfCheck", "FgClarityRaidSelfCheck.cs", "D3 没有净化塔覆盖、还有污染的地方"),
+            ("R2 目标死亡：洗礼塔场上机器全灭 → 复位", "FgBaptismTowerSelfCheck", "FgBaptismTowerSelfCheck.cs", "F2 负向“全灭”"),
+            ("R2 目标死亡：全灭后从首领战前自动存档重试", "FgBaptismTowerSelfCheck", "FgBaptismTowerSelfCheck.cs", "F3 负向“全灭重试”"),
+            ("R2 目标死亡：澄净突袭队伍全灭 → 剧场关闭、投放目标清空", "FgClarityRaidSelfCheck", "FgClarityRaidSelfCheck.cs", "D5 澄净队伍全灭"),
+            ("R3 断网 / 失联：远征队走出覆盖先提醒、走出后提示（行军系统与第一幕同一套）", "FgMilestoneM8SelfCheck", "FgMilestoneM8SelfCheck.World.cs", "R3 断网 / 失联（FGR-SIG-053）"),
+            ("R3 恢复：铺中继回到覆盖、能接入", "FgMilestoneM8SelfCheck", "FgMilestoneM8SelfCheck.World.cs", "R3 恢复：沿路线铺"),
+            ("R4 暂停与倍速：洗礼塔灌注预警按游戏时间", "FgBaptismTowerSelfCheck", "FgBaptismTowerSelfCheck.cs", "H1 倍速矩阵"),
+            ("R4 暂停与倍速：暂停时酸沼不扣耐久、各倍速同扣", "FgClarityFactionSelfCheck", "FgClarityFactionSelfCheck.cs", "G2 暂停时酸沼不扣耐久"),
+            ("R4 暂停与倍速：再污染在暂停 / 0.5x～3x / 不观察下逐位一致", "FgClarityRaidSelfCheck", "FgClarityRaidSelfCheck.cs", "H1 暂停 1.5 秒世界不动"),
+            ("R4 暂停与倍速：涂层写入与介绍在暂停时不发生", "FgSettlingLakeSelfCheck", "FgSettlingLakeSelfCheck.cs", "E1 暂停时涂层不写入"),
+            ("R5 存读档：洗礼塔首领战中存档 → 读档一致", "FgBaptismTowerSelfCheck", "FgBaptismTowerSelfCheck.cs", "G1 首领战中"),
+            ("R5 存读档：无人机投放前真文件存档 → 读档续跑一致", "FgClarityRaidSelfCheck", "FgClarityRaidSelfCheck.cs", "D4 投放前真文件存档"),
+            ("R5 存读档：涂层与介绍读档不补发", "FgSettlingLakeSelfCheck", "FgSettlingLakeSelfCheck.cs", "E2 存读档"),
+            ("R5 存读档：化工反应开放状态读档后仍在", "FgClarityReactionSelfCheck", "FgClarityReactionSelfCheck.cs", "F2 存读档"),
+            ("R6 路径失败：被拒后改下不进酸沼的命令，再进酸沼仍先拒绝（不残留放行）", "FgSettlingLakeSelfCheck", "FgSettlingLakeSelfCheck.cs", "C2b 负向：被拒后先下一条不进酸沼的命令"),
+            ("R6 路径失败：远征路线被截断 → 停下、提示、投送舱接回", "FgMilestoneM8SelfCheck", "FgMilestoneM8SelfCheck.World.cs", "R6 路径失败：锚点被悬崖围住"),
+        };
+
         private static void CheckReverseScenarios()
         {
             Line("  · R. IC-REQ-022 六类反向（化工段）：每类至少一条起真实系统的断言仍在源码里、所在段登记在全量自检；能进旅程的另有 FGJ-M10 步骤；承接项各有断言");
             var segments = new HashSet<string>(CellFrameworkValidate.SegmentNames, StringComparer.Ordinal);
-            var map = new (string Category, string Segment, string File, string Label)[]
-            {
-                ("R1 条件不足：没有防腐涂层时往湖心下令 → 拒绝并说明蓝图来源", "FgSettlingLakeSelfCheck", "FgSettlingLakeSelfCheck.cs", "C2 负向（卡片“没有防腐涂层时尝试进入”）"),
-                ("R1 资源不足：没有净化塔覆盖的污染 → 路径写“在附近放一座净化塔”", "FgClarityRaidSelfCheck", "FgClarityRaidSelfCheck.cs", "D3 没有净化塔覆盖、还有污染的地方"),
-                ("R2 目标死亡：洗礼塔场上机器全灭 → 复位", "FgBaptismTowerSelfCheck", "FgBaptismTowerSelfCheck.cs", "F2 负向“全灭”"),
-                ("R2 目标死亡：全灭后从首领战前自动存档重试", "FgBaptismTowerSelfCheck", "FgBaptismTowerSelfCheck.cs", "F3 负向“全灭重试”"),
-                ("R2 目标死亡：澄净突袭队伍全灭 → 剧场关闭、投放目标清空", "FgClarityRaidSelfCheck", "FgClarityRaidSelfCheck.cs", "D5 澄净队伍全灭"),
-                ("R3 断网 / 失联：远征队走出覆盖先提醒、走出后提示（行军系统与第一幕同一套）", "FgMilestoneM8SelfCheck", "FgMilestoneM8SelfCheck.World.cs", "R3 断网 / 失联（FGR-SIG-053）"),
-                ("R3 恢复：铺中继回到覆盖、能接入", "FgMilestoneM8SelfCheck", "FgMilestoneM8SelfCheck.World.cs", "R3 恢复：沿路线铺"),
-                ("R4 暂停与倍速：洗礼塔灌注预警按游戏时间", "FgBaptismTowerSelfCheck", "FgBaptismTowerSelfCheck.cs", "H1 倍速矩阵"),
-                ("R4 暂停与倍速：暂停时酸沼不扣耐久、各倍速同扣", "FgClarityFactionSelfCheck", "FgClarityFactionSelfCheck.cs", "G2 暂停时酸沼不扣耐久"),
-                ("R4 暂停与倍速：再污染在暂停 / 0.5x～3x / 不观察下逐位一致", "FgClarityRaidSelfCheck", "FgClarityRaidSelfCheck.cs", "H1 暂停 1.5 秒世界不动"),
-                ("R4 暂停与倍速：涂层写入与介绍在暂停时不发生", "FgSettlingLakeSelfCheck", "FgSettlingLakeSelfCheck.cs", "E1 暂停时涂层不写入"),
-                ("R5 存读档：洗礼塔首领战中存档 → 读档一致", "FgBaptismTowerSelfCheck", "FgBaptismTowerSelfCheck.cs", "G1 首领战中"),
-                ("R5 存读档：无人机投放前真文件存档 → 读档续跑一致", "FgClarityRaidSelfCheck", "FgClarityRaidSelfCheck.cs", "D4 投放前真文件存档"),
-                ("R5 存读档：涂层与介绍读档不补发", "FgSettlingLakeSelfCheck", "FgSettlingLakeSelfCheck.cs", "E2 存读档"),
-                ("R5 存读档：化工反应开放状态读档后仍在", "FgClarityReactionSelfCheck", "FgClarityReactionSelfCheck.cs", "F2 存读档"),
-                ("R6 路径失败：被拒后改下不进酸沼的命令，再进酸沼仍先拒绝（不残留放行）", "FgSettlingLakeSelfCheck", "FgSettlingLakeSelfCheck.cs", "C2b 负向：被拒后先下一条不进酸沼的命令"),
-                ("R6 路径失败：远征路线被截断 → 停下、提示、投送舱接回", "FgMilestoneM8SelfCheck", "FgMilestoneM8SelfCheck.World.cs", "R6 路径失败：锚点被悬崖围住"),
-            };
+            var map = ReverseMap;
             var bad = new List<string>();
             var cats = new HashSet<string>(StringComparer.Ordinal);
             foreach ((string category, string segment, string file, string label) in map)

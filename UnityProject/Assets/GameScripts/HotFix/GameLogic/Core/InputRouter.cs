@@ -58,6 +58,10 @@ namespace GameLogic.Core
         /// （FG01 第 5 章），真正打开的面板仍然挡住世界输入。</summary>
         public static bool PanelModalOpen => _modalUi || ModalOwners.Count > 0;
 
+        /// <summary>FG15-QA-01：诊断用——当前占着面板模态的是谁（类型名；旧布尔占用记“modalUi”）。旅程失败信息里写出来。</summary>
+        public static string PanelModalOwnersForDiagnostics =>
+            string.Join(",", System.Linq.Enumerable.Select(ModalOwners, o => o?.GetType().Name ?? "null")) + (_modalUi ? (ModalOwners.Count > 0 ? "," : string.Empty) + "modalUi" : string.Empty);
+
         private static bool _modalUi;
         /// <summary>FG0-UX-01：UI 基础件（确认框、按键面板、暂停菜单、通知中心）各自登记的模态占用。
         /// 与旧的单个布尔 <see cref="_modalUi"/> 分开存：多个面板叠开时，关掉上面一个不会把下面那个的占用抹掉。</summary>

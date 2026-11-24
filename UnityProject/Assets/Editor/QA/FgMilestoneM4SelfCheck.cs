@@ -98,6 +98,16 @@ namespace GameLogic.EditorTools
         private static bool Wellformed(JourneyDef d) => d != null && d.Steps.Count > 0 && d.Steps.Select(x => x.Id).Distinct().Count() == d.Steps.Count
                                                         && d.Steps.All(x => x.TimeoutSeconds > 0 && x.Tick != null) && d.TotalTimeoutSeconds > 0;
 
+        internal static readonly (string Kind, string[] Ids)[] ReverseSteps =
+        {
+            ("路径失败（放错位置）", new[] { "r1_pick", "r1_bad", "m2_place" }),
+            ("资源不足（装配站缺材料）", new[] { "r2_sub_off", "r2_produce", "r2_sub_on", "r2_done" }),
+            ("暂停与倍速", new[] { "r3_pause", "r3_frozen", "r3_resume", "r3_half", "r3_triple" }),
+            ("目标死亡（拆掉工作中的下游）", new[] { "r4_click", "r4_gone", "r4_undo", "r4_back" }),
+            ("断链（超控阵列断电）", new[] { "r5_built", "r5_slot", "r5_ask", "r5_cut", "r5_undo", "r5_back" }),
+            ("存读档", new[] { "r6_quit", "r6_menu", "r6_load", "r6_loaded" }),
+        };
+
         private static void CheckJourneyCatalog()
         {
             Line("  · A. 旅程登记：FGJ-M4 覆盖出口旅程原文每一步与 DEBT-FG3E2E01-01 的回补；FGJ-M4R 覆盖 IC-REQ-022 六类；种子不同；两条都登记断点");
@@ -121,15 +131,7 @@ namespace GameLogic.EditorTools
             List<string> missing = exit.Where(x => m4 == null || x.Ids.Any(id => m4.Steps.All(s => s.Id != id))).Select(x => x.Step).ToList();
             Expect(Wellformed(m4) && missing.Count == 0 && m4.Seed == FgjM4Journey.TestSeed,
                 $"FGJ-M4：{m4?.Steps.Count} 步、步骤 ID 不重复、每步有超时与检查、固定种子 {m4?.Seed}；出口旅程各步与回补都有对应步骤{(missing.Count == 0 ? string.Empty : "，缺：" + string.Join("、", missing))}");
-            var reverse = new (string Kind, string[] Ids)[]
-            {
-                ("路径失败（放错位置）", new[] { "r1_pick", "r1_bad", "m2_place" }),
-                ("资源不足（装配站缺材料）", new[] { "r2_sub_off", "r2_produce", "r2_sub_on", "r2_done" }),
-                ("暂停与倍速", new[] { "r3_pause", "r3_frozen", "r3_resume", "r3_half", "r3_triple" }),
-                ("目标死亡（拆掉工作中的下游）", new[] { "r4_click", "r4_gone", "r4_undo", "r4_back" }),
-                ("断链（超控阵列断电）", new[] { "r5_built", "r5_slot", "r5_ask", "r5_cut", "r5_undo", "r5_back" }),
-                ("存读档", new[] { "r6_quit", "r6_menu", "r6_load", "r6_loaded" }),
-            };
+            var reverse = ReverseSteps;
             List<string> missingR = reverse.Where(x => m4r == null || x.Ids.Any(id => m4r.Steps.All(s => s.Id != id))).Select(x => x.Kind).ToList();
             Expect(Wellformed(m4r) && missingR.Count == 0 && m4r.Seed != m4.Seed,
                 $"FGJ-M4R：{m4r?.Steps.Count} 步；六类反向场景齐全{(missingR.Count == 0 ? string.Empty : "，缺：" + string.Join("、", missingR))}；种子 {m4r?.Seed} ≠ {m4?.Seed}（B25）");

@@ -763,15 +763,31 @@ namespace GameLogic.EditorTools
 
         // ── J 暂停、倍速、观察一致 ─────────────────────────────────────────
 
+        /// <summary>焦土阈值：规则行 reaction_scorch 的 c1（同一位置累计燃烧秒，FG19B V03 = 20 秒）；规则表没有这一行时按规格值。</summary>
+        private static float ScorchThresholdSeconds
+        {
+            get
+            {
+                EmgRuleCatalog.Compiled c = EmgRuleCatalog.Current;
+                int i = c.Ok ? c.Ids.IndexOf("reaction_scorch") : -1;
+                return i >= 0 ? c.Rules[i].C1 : 20f;
+            }
+        }
+
+        private static float J1FireLife => ScorchThresholdSeconds + 2f;
+
+        private static int J1WindowSeconds => (int)Math.Ceiling(J1FireLife + 8f);
+
         private static string Scenario(int seed, bool observe, float speed, bool pauseFirst, out bool pausedHeld)
         {
             CampaignState s = NewWorld(seed, observe, 100);
             pausedHeld = true;
             CombatKernel k = HomeKernel;
-            // 明火自带 22 秒寿命：单块就跨过焦土 20 秒阈值（两块相邻会并成一块，只记一次燃烧秒）。原先按默认 18 秒，靠站在火里的机器烧毁排放给明火续时
-            // 才过 20 秒，焦土出不出取决于持续伤害节拍（FG-GAP-160 修前双结算烧死两台机器续到 21.8 秒）；现在机器续时只会推迟到期，窗口 30 秒留足余量。
+            // 明火寿命 = 焦土阈值（规则行 reaction_scorch 的 c1，FG19B V03 规格 20 秒）+ 2 秒：单块就跨过阈值（两块相邻会并成一块，只记一次燃烧秒）。
+            // 原先按默认 18 秒，靠站在火里的机器烧毁排放给明火续时才过阈值，焦土出不出取决于持续伤害节拍（FG-GAP-160 修前双结算烧死两台机器续到 21.8 秒）；
+            // 机器续时只会推迟到期，观察窗口 = 寿命 + 8 秒留足余量（DEBT-EMGREXIT-03：时长由规格常量推导，不写死秒数）。
             GridCell g = FindSpot(s, Open) ?? HomeGridService.CorePivot(s);
-            k.SpawnPatch(EmgMatterConst.Fire, new double2(g.X, g.Y), 1.5f, 40f, 22f);
+            k.SpawnPatch(EmgMatterConst.Fire, new double2(g.X, g.Y), 1.5f, 40f, J1FireLife);
             k.SpawnPatch(EmgMatterConst.Fire, new double2(g.X + 1, g.Y), 1.5f, 30f);
             k.SpawnPatch(EmgMatterConst.Glass, new double2(g.X - 6, g.Y), 1.5f, 10f);
             WorldSimulation.StepMany(2);
@@ -788,7 +804,7 @@ namespace GameLogic.EditorTools
                 GameClock.SetPaused(false);
             }
             GameClock.SetSpeed(speed);
-            long target = GameClock.Ticks + GameClock.StepHz * 30;
+            long target = GameClock.Ticks + GameClock.StepHz * J1WindowSeconds;
             int frames = 0;
             while (GameClock.Ticks < target && frames < 60 * 600)
             {
@@ -812,7 +828,7 @@ namespace GameLogic.EditorTools
                 same &= d == reference;
             }
             Expect(paused && same && reference.Contains(":1@") && reference.Contains(":2@"),
-                $"J1 暂停 120 帧不烧、不写格；0.5x / 1x / 3x 跑同样 30 游戏秒结果逐字一致（{reference}）");
+                $"J1 暂停 120 帧不烧、不写格；0.5x / 1x / 3x 跑同样 {J1WindowSeconds} 游戏秒（焦土阈值 {ScorchThresholdSeconds:0} 秒 + 明火寿命余量 2 秒 + 观察余量 8 秒）结果逐字一致（{reference}）");
             string seen = Scenario(Seeds[2], true, 1f, false, out _);
             string unseen = Scenario(Seeds[2], false, 1f, false, out _);
             Expect(seen == unseen, $"J2 B24 家园不被观察时结果一致（{unseen}）");
