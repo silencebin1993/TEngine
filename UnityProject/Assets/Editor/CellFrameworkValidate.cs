@@ -728,6 +728,11 @@ namespace GameLogic.EditorTools
             // FG8-GEN-02 阵营领地与室内场地（FG17 FGR-GEN-021～024、040、042、090；FGT-GEN-004 / 006）：数据、生成器 v3 与旧版本存档、规划层规则（3 个种子）、
             // 锚点冲突重试、可达性（3 个种子）、领地内容与据点登记、外延区按需登记、缓存 / 终端、入口保护、室内进出 / 倍速 / 存读档、名称提示、检查单危害、地点覆盖根、Demo 模板回归、性能、布局探针。
             Seg("FgTerritorySelfCheck", FgTerritorySelfCheck.Run);
+            // FG15-QA-03 种子测试集（FGR-GEN-090 / 091 / 061；FGT-GEN-003 / 004 / 006 / 009）：50 个种子 × 当前生成器版本的起始区 / 领地布局 / 可达（领地、白潮滩头、侦察巢、遗迹点、全部锚点）、
+            // 锚点粗粒度连通性判定与换候选、极端世界设置组合、种子 × 版本回归哈希（FgSeedSuiteBaseline.tsv）、旧版本存档、失败定位；一键：bash tools/seed-suite.sh。
+            Seg(FgSeedSuiteSelfCheck.SegmentName, FgSeedSuiteSelfCheck.Run);
+            // FG15-QA-03 种子测试集·行军截断率（FG-GAP-136 防回归）：50 个种子新档第一次远征破碎都市，截断即列出种子与位置。
+            Seg(FgSeedSuiteSelfCheck.MarchSegmentName, FgExpeditionMarchSelfCheck.RunSeedSuiteMarch);
             // FG8-EXP-03 领地控制、增援与收复（FG08 FGR-EXP-021 / 022 / 030；FG17 FGR-GEN-060；FGT-EXP-005）：数据、控制度与地图标签、迎战与摧毁 / 收拢 / 巡逻歼灭、
             // 阵营增援（确定性重建、玩家附近不重建）、首领 → 平定（休眠补算一致）、收复（巡逻撤离、核心备忘、未平定不收复、残留据点）、精英残部、骚扰、收复后的净化与再污染、存读档、暂停与倍速、巡逻标记不跳位、性能。
             Seg("FgTerritoryControlSelfCheck", FgTerritoryControlSelfCheck.Run);

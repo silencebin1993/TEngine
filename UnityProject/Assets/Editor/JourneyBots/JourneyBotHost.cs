@@ -38,6 +38,9 @@ namespace GameLogic.EditorTools.JourneyBots
             { FgjEmg3Journey.Id, FgjEmg3Journey.Build }, // EMG3-E2E-01：FG-EMG 阶段 3 出口旅程（履带拖火线 → 悬浮跨燃烧区 → 中继放电 → 两台齐射 → 条件门连锁 → [若被标记, 复制, 分裂]）
             { FgjEmgRJourney.Id, FgjEmgRJourney.Build }, // EMGR-E2E-01：补功能批次 EMG-R 出口旅程（右键攻击绕悬崖 → 移动途中教义自卫 → 敌方结构单位挨油与明火 → 切割束 0.5 秒一段 → 入场引信穿场分裂、机器进出场 → 存读档）
             { FgjM12Journey.Id, FgjM12Journey.Build }, // FG12-E2E-01：M12 出口旅程（信号幽灵反向接入 → 震动 80 警告 → 蠕虫分节击毁 → 轨道坠落撤圈回收 → 标记器识别诱饵终端 → 商队交易）
+            // FG15-QA-03：种子测试集里另两个种子跑 FGJ-M13 同一套步骤（主菜单 → 结局，FGR-GEN-091）。
+            { FgjM13Journey.SeedJourneyId(FgSeedSuiteSelfCheck.JourneySeeds[1]), () => FgjM13Journey.Build(FgSeedSuiteSelfCheck.JourneySeeds[1]) },
+            { FgjM13Journey.SeedJourneyId(FgSeedSuiteSelfCheck.JourneySeeds[2]), () => FgjM13Journey.Build(FgSeedSuiteSelfCheck.JourneySeeds[2]) },
             { FgjM13Journey.Id, FgjM13Journey.Build }, // FG13-E2E-01：M13 出口旅程（返航工地第五阶段完工 → 点亮信标揭示 → 守住三波清洗 → 摧毁白潮滩头 → 击败先遣旗舰（阶段三反向接入夺回）→ 结局结算 → 继续）
             { FgjM11Journey.Id, FgjM11Journey.Build }, // FG11-E2E-01：M11 出口旅程（热寂数据城辐射与冷却塔 → 镜像体换固件 → 余烬主机槽位封锁夺回 → 超控阵列 T3 → 超频突袭）
             { FgjM14Journey.Id, FgjM14Journey.Build }, // FG14-E2E-01：M14 出口旅程（通关存档读档 → 结算“继续”进入后日谈 → 撑过两次周期清洗 → 坚守记录 → 自定义种子、关闭突袭的沙盒，确认没有突袭）

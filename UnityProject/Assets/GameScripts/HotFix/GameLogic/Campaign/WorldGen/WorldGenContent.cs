@@ -12,8 +12,9 @@ namespace GameLogic.Campaign.WorldGen
         /// <summary>新战役使用的生成器版本。**任何会改变生成结果的改动都必须新增 fg.TbWorldGenVersion 的一行并把它加 1**；
         /// 旧行不许改（FgWorldGenSelfCheck 的回归哈希守护）。v2 = FG3-GEN-01（起始区四级保证、河流与矿带、分项世界设置、遗迹点与侦察巢）；
         /// v3 = FG8-GEN-02（领地模板、手工锚点与室内入口、领地之间与外延区的零散前哨和缓存）；
-        /// v4 = FG11-REG-01（锚点集合 as4：沉淀湖湖心平台四周的水环与堤道，DEBT-FG10BOSS01-02；其余与 v3 相同）。</summary>
-        public const int Current = 4;
+        /// v4 = FG11-REG-01（锚点集合 as4：沉淀湖湖心平台四周的水环与堤道，DEBT-FG10BOSS01-02；其余与 v3 相同）；
+        /// v5 = FG15-QA-03（非 Demo 锚点的粗粒度连通性判定，被地形围住就按子种子换候选，FGR-GEN-090 / DEBT-FG8GEN02-09；不需要换候选时与 v4 逐格相同）。</summary>
+        public const int Current = 5;
 
         /// <summary>0 = 尚未启用程序生成：FG0-ARCH-05 之前的存档，地形来自 FG0-ARCH-04 的原型来源（GridTerrainPrototype，保留为旧版本路径）。</summary>
         public const int LegacyPrototype = 0;

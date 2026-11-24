@@ -124,6 +124,11 @@ namespace GameLogic.Campaign.WorldGen
                     }
                 }
                 parts.Add(Part(pre + "template_points", sb.ToString()));
+                if (v.Version >= TerritoryPlanner.ReachRegenFromVersion)
+                {
+                    // FG15-QA-03（v5 起）：锚点粗粒度连通性判定（判定框外放格数、4 邻接、悬崖 / 水面不可走）；v1～v4 的清单不变。
+                    parts.Add(Part(pre + "anchor_escape", Join(TerritoryPlanner.EscapeMargin, "4n", "cliff|water", v.PlanMaxAttempts)));
+                }
             }
 
             parts.Add(Part("grid.chunk_size", GridContent.TuningInt("grid.chunk_size").ToString(CultureInfo.InvariantCulture)));

@@ -168,7 +168,7 @@ namespace GameLogic.EditorTools
         {
             TerritoryTemplate tpl = WorldGenContent.TemplateRows.FirstOrDefault(r => r != null && r.TerritoryId == EnemyDefs.FactionOverclock);
             bool template = tpl != null && tpl.HazardZones > 0 && tpl.SideChance > 0f && tpl.RelicFactor > 0f && tpl.CacheChance > 0f && tpl.TerminalChance > 0f && GameText.Has(tpl.IntroKey);
-            bool v4 = WorldGenVersions.Current == 4 && WorldGenContent.TryGetVersion(4, out WorldGenVersion row4) && row4.AnchorSet == "as4" && row4.TemplateSet == "tt3"
+            bool v4 = WorldGenVersions.Current >= 4 && WorldGenContent.Version(WorldGenVersions.Current).AnchorSet == "as4" /* FG15-QA-03：v5 只多锚点粗粒度连通性判定，仍用 as4 */ && WorldGenContent.TryGetVersion(4, out WorldGenVersion row4) && row4.AnchorSet == "as4" && row4.TemplateSet == "tt3"
                       && WorldGenContent.TryGetVersion(3, out WorldGenVersion row3) && row3.AnchorSet == "as3";
             List<AnchorSite> as4 = WorldGenContent.AnchorsFor(WorldGenContent.Version(4));
             List<AnchorSite> as3 = WorldGenContent.AnchorsFor(WorldGenContent.Version(3));

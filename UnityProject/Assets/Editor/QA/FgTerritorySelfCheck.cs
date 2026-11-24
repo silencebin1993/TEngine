@@ -98,14 +98,34 @@ namespace GameLogic.EditorTools
 
         private static bool _probeOnly;
 
+        /// <summary>FG15-QA-03 种子测试集的锚点一步（<see cref="FgSeedSuiteSelfCheck"/> 调用，并入全量自检）：种子测试集 50 个种子 × 当前生成器版本，
+        /// 全部要校验的锚点走生产的 <see cref="TerritoryAnchorChecks"/>（层级寻路，Demo 两处经 ExpeditionSiteAnchors 的候选）从家园可达。返回失败数。</summary>
+        internal static int RunReachSeedSet(StringBuilder report)
+        {
+            _probeOnly = true;
+            try
+            {
+                return Run(report);
+            }
+            finally
+            {
+                _probeOnly = false;
+            }
+        }
+
+        /// <summary>自检读点：上一次锚点一步校验的锚点数（FgSeedSuiteSelfCheck 断言覆盖面用）。</summary>
+        internal static int LastProbeAnchors;
+
         private static void ProbeReach()
         {
             var failed = new List<string>();
             int moved = 0;
             double worst = 0;
+            int anchors = 0;
             foreach (int seed in FgWorldGenHomeSelfCheck.SeedSet)
             {
-                CampaignState s = NewWorld(seed);
+                // FG15-QA-03：按新战役的生成器版本（原来写死 v3）。
+                CampaignState s = NewWorld(seed, WorldGenVersions.Current);
                 WorldPlan plan = WorldGenService.PlanFor(s);
                 var sw = Stopwatch.StartNew();
                 bool all = TerritoryAnchorChecks.EnsureAll(s);
@@ -114,10 +134,14 @@ namespace GameLogic.EditorTools
                 foreach (PlannedAnchor a in plan.Anchors.Where(x => x.Row.ReachCheck == 1))
                 {
                     int st = TerritoryAnchorChecks.StateOf(s, a);
+                    anchors++;
                     moved += st == TerritoryAnchorChecks.StateMoved ? 1 : 0;
                     if (st != TerritoryAnchorChecks.StateOk && st != TerritoryAnchorChecks.StateMoved)
                     {
-                        failed.Add($"种子 {seed} {a.Id}:{st}");
+                        // FG15-QA-03：失败时报告种子、表面、区块坐标和失败项。
+                        string note = TerritoryAnchorChecks.Find(s, a.Id)?.Note;
+                        failed.Add($"种子 {seed}｜表面 {WorldGenContent.EarthSurfaceId}｜区块 ({Fd(a.EntryX, 32)},{Fd(a.EntryY, 32)})｜锚点 {a.Id} 入口 ({a.EntryX},{a.EntryY})：" +
+                                   (st == TerritoryAnchorChecks.StateFailed ? "从家园走不到" : "没校验完（待定）") + (string.IsNullOrEmpty(note) ? string.Empty : "（" + note + "）"));
                     }
                 }
                 if (!all)
@@ -125,9 +149,11 @@ namespace GameLogic.EditorTools
                     failed.Add($"种子 {seed} 有锚点没校验完");
                 }
             }
-            Expect(failed.Count == 0,
-                $"P1 探针 FGR-GEN-091：{FgWorldGenHomeSelfCheck.SeedSet.Length} 个种子 × 标准设置，全部锚点从家园出发可达（挪位 {moved} 个；单个种子最长 {worst:0} ms）" +
-                (failed.Count == 0 ? string.Empty : $"——走不到 {failed.Count} 处：" + string.Join("，", failed.Take(10))));
+            LastProbeAnchors = anchors;
+            Expect(failed.Count == 0 && anchors >= 6 * FgWorldGenHomeSelfCheck.SeedSet.Length,
+                $"FGT-GEN-004 种子测试集（FGR-GEN-091）：{FgWorldGenHomeSelfCheck.SeedSet.Length} 个种子 × 标准设置 × 生成器 v{WorldGenVersions.Current}，全部 {anchors} 个要校验的锚点" +
+                $"（两个室内入口、洗礼平台、白潮滩头、Demo 两处远征地点）走生产的可达校验从家园出发可达（挪位 {moved} 个；单个种子最长 {worst:0} ms）" +
+                (failed.Count == 0 ? string.Empty : $"——走不到 {failed.Count} 处：" + string.Join("；", failed.Take(20))));
         }
 
         public static int Run(StringBuilder report)
@@ -146,6 +172,8 @@ namespace GameLogic.EditorTools
             CampaignState originalSession = CampaignSession.Current;
             int originalSlot = CampaignSession.ActiveSlotIndex;
             Func<float> originalDelta = CameraDirector.RealDeltaTime;
+            // FG15-QA-03 修复轮：被种子测试集嵌套调用（RunReachSeedSet）时收尾要还原调用方的临时目录，置 null 会让调用方后面的存档落进玩家真实目录。
+            string originalSaveDir = CampaignSaveService.SaveDirectoryOverrideForTests;
             _dir = Path.Combine(Path.GetTempPath(), "bingames-fgterritory-selfcheck-" + Guid.NewGuid().ToString("N"));
             try
             {
@@ -216,7 +244,7 @@ namespace GameLogic.EditorTools
                 {
                     Fail("收尾卸载世界抛异常：" + e.Message);
                 }
-                CampaignSaveService.SaveDirectoryOverrideForTests = null;
+                CampaignSaveService.SaveDirectoryOverrideForTests = originalSaveDir;
                 GameSettings.SetLanguage(originalLanguage);
                 if (originalSession != null && originalSlot >= 0)
                 {

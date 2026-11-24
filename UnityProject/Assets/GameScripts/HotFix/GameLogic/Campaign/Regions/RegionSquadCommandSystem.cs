@@ -166,6 +166,12 @@ namespace GameLogic.Campaign.Regions
         public IReadOnlyList<int> LastStartedIds => _lastStarted;
         private readonly List<Vector2> _coverageRouteScratch = new List<Vector2>(2);
         public IReadOnlyList<string> RecentEvents => _recentEvents;
+
+        private readonly Dictionary<int, int> _hitOutcomes = new Dictionary<int, int>();
+
+        /// <summary>旅程 / 自检读点（DEBT-EMGREXIT-02）：这台机器的编队攻击“命中”结果事件（内核 AttackOutcome = Ok / StillAiming，出手者 = 这台）累计次数。
+        /// 按出手者区分，别的伤害来源（自卫、余火）不计入。O(1)。</summary>
+        public int HitOutcomes(int logicId) => _hitOutcomes.TryGetValue(logicId, out int n) ? n : 0;
         public RegionCommandKind? ArmedKind => _armedKind;
         public bool ConsumedClickThisFrame => _clickConsumedThisFrame;
 
@@ -1054,6 +1060,7 @@ namespace GameLogic.Campaign.Regions
                     }
                     if (r == BinGames.Sim.Combat.CombatFireResult.Ok || r == BinGames.Sim.Combat.CombatFireResult.StillAiming)
                     {
+                        _hitOutcomes[logicId] = HitOutcomes(logicId) + 1;
                         PushEvent(GameText.Format(destroyed ? "squad.ev.destroyed" : "squad.ev.hit", MachineNaming.Short(logicId), hostileId));
                     }
                     else

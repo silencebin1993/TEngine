@@ -108,13 +108,13 @@ namespace GameLogic.Campaign.WorldGen
         private const uint HazardSalt = 0x485A4F4Eu; // "HZON"
 
         /// <summary>v3 起：放锚点、加风格与平整形状、放危害区。<paramref name="zones"/> 是给内核的形状列表（追加到河流 / 矿带之后）。</summary>
-        public static void Plan(WorldPlan plan, uint seed, WorldGenVersion v, List<WorldGenZone> zones)
+        public static void Plan(WorldPlan plan, uint seed, WorldGenVersion v, List<WorldGenZone> zones, IReadOnlyDictionary<string, int> anchorFirstAttempt = null)
         {
             if (!WorldGenContent.HasTerritoryContent(v))
             {
                 return;
             }
-            PlaceAnchors(plan, seed, v);
+            PlaceAnchors(plan, seed, v, anchorFirstAttempt);
             foreach (TerritoryTemplate t in WorldGenContent.TemplatesFor(v))
             {
                 plan.Templates[t.TerritoryId] = t;
@@ -138,6 +138,11 @@ namespace GameLogic.Campaign.WorldGen
                     continue;
                 }
                 int outer = a.FootprintRadius + Math.Max(0, a.BlendWidth);
+                if (EnclosureForTests != null && EnclosureForTests(a))
+                {
+                    // 自检注入（FG15-QA-03）：平整范围外围一圈 6 格宽的悬崖（先盖悬崖圆盘，下面的平整形状再盖回内圈），驱动粗粒度连通性判定的换候选路径。
+                    zones.Add(WorldPlan.Stamp(a.OriginX, a.OriginY, outer + 6, GridContent.TerrainCode("cliff")));
+                }
                 zones.Add(new WorldGenZone
                 {
                     Kind = WorldGenZoneKind.Flatten,
@@ -237,7 +242,7 @@ namespace GameLogic.Campaign.WorldGen
 
         // ── 手工锚点 ───────────────────────────────────────────────────────────
 
-        private static void PlaceAnchors(WorldPlan plan, uint seed, WorldGenVersion v)
+        private static void PlaceAnchors(WorldPlan plan, uint seed, WorldGenVersion v, IReadOnlyDictionary<string, int> anchorFirstAttempt)
         {
             List<AnchorSite> rows = WorldGenContent.AnchorsFor(v);
             int maxAttempts = Math.Max(1, v.PlanMaxAttempts);
@@ -252,7 +257,12 @@ namespace GameLogic.Campaign.WorldGen
                 }
                 PlannedAnchor placed = null;
                 string lastWhy = null;
-                for (int k = 0; k < maxAttempts && placed == null; k++)
+                int k0 = anchorFirstAttempt != null && anchorFirstAttempt.TryGetValue(row.Id, out int first) ? Math.Max(0, Math.Min(first, maxAttempts - 1)) : 0;
+                if (k0 > 0)
+                {
+                    lastWhy = "粗粒度连通性判定：前一个候选被地形围住"; // loc-ignore: 开发者自检 / 诊断文本
+                }
+                for (int k = k0; k < maxAttempts && placed == null; k++)
                 {
                     uint h = WorldGenMath.Hash(seed, i, k, AnchorSalt);
                     uint h2 = WorldGenMath.Hash(seed, i, k, AnchorSalt ^ 0x9E3779B9u);
@@ -535,6 +545,133 @@ namespace GameLogic.Campaign.WorldGen
                 if (ex * ex + ey * ey <= er * er)
                 {
                     return true;
+                }
+            }
+            return false;
+        }
+
+        // ── 粗粒度连通性判定（FG15-QA-03，FGR-GEN-090 第 2 条 / DEBT-FG8GEN02-09）──────────────────────────────
+
+        /// <summary>从这个生成器版本起，规划层对非 Demo 锚点做粗粒度连通性判定、被围住就按子种子换候选（v1～v4 不做，旧存档的生成结果不变，FGR-GEN-061）。</summary>
+        public const int ReachRegenFromVersion = 5;
+
+        /// <summary>判定范围：锚点平整半径 + 过渡带 + 水环之外再放这么多格；从入口出发的可走连通块要碰到这个方框的边才算“没被地形围住”。
+        /// 是生成输入（列进 v5 起的生成输入清单），不入调参表：改它就要新增生成器版本。</summary>
+        public const int EscapeMargin = 48;
+
+        /// <summary>自检注入：返回 true 的候选在平整范围外围一圈悬崖（只用来驱动换候选路径的正负向断言）。</summary>
+        public static Func<PlannedAnchor, bool> EnclosureForTests;
+
+        /// <summary>要做粗粒度连通性判定的锚点：要校验可达、且不是 Demo 远征地点（那两个由 ExpeditionSiteAnchors 的 8 次候选负责）。</summary>
+        public static bool NeedsEscapeCheck(PlannedAnchor a) => a != null && a.Row != null && a.Row.ReachCheck == 1 && a.Kind != KindDemo;
+
+        /// <summary>
+        /// 与存档无关的粗粒度连通性判定（只读生成出来的地形，不读玩家修改）：在以锚点原点为中心、半边长
+        /// 平整半径 + 过渡带 + 水环 + <see cref="EscapeMargin"/> 的方框里，从入口格 4 邻接漫水（悬崖 / 水面不可走），碰到方框边 = 没被地形整体围住。
+        /// 只证明“锚点附近没有闭合的悬崖 / 水圈”；远处的隔断（河流）由浅滩周期保证（check_luban R29），真寻路可达仍由运行时
+        /// <see cref="TerritoryAnchorChecks"/> 与种子测试集（FgSeedSuiteSelfCheck）兜底。
+        /// 开销：深度优先、先往外走，区块按需生成——开阔地形里每个锚点只生成从入口到框边一条线上的几个区块；被围住时只漫完围住的那一块。
+        /// </summary>
+        public static bool EscapesLocally(WorldTerrainSource src, PlannedAnchor a, out int reached)
+        {
+            reached = 0;
+            int r = a.FootprintRadius + Math.Max(0, a.BlendWidth) + Math.Max(0, a.Row?.WaterRing ?? 0) + EscapeMargin;
+            int n = 2 * r + 1;
+            int x0 = a.OriginX - r;
+            int y0 = a.OriginY - r;
+            int ex = a.EntryX - x0;
+            int ey = a.EntryY - y0;
+            if (ex < 0 || ey < 0 || ex >= n || ey >= n)
+            {
+                return false;
+            }
+            int cs = src.Params.ChunkSize;
+            byte cliff = src.Params.CodeCliff;
+            byte water = src.Params.CodeWater;
+            // 区块按需生成（Burst 整块）：深度优先、先走离原点更远的一格，开阔地形里一路往外，只碰到一条线上的几个区块（审查前实测整框预生成约 200 个区块 / 世界，会让建世界多卡一下）。
+            var chunks = new Dictionary<long, byte[]>();
+            var pol = new byte[cs * cs];
+            bool Walk(int gx, int gy)
+            {
+                int wx = x0 + gx;
+                int wy = y0 + gy;
+                long cx = WorldGenMath.FloorDiv(wx, cs);
+                long cy = WorldGenMath.FloorDiv(wy, cs);
+                long key = (cx << 32) ^ (uint)cy;
+                if (!chunks.TryGetValue(key, out byte[] t))
+                {
+                    t = new byte[cs * cs];
+                    src.FillChunk((int)cx, (int)cy, cs, t, pol);
+                    chunks[key] = t;
+                }
+                byte c0 = t[(int)(wy - cy * cs) * cs + (int)(wx - cx * cs)];
+                return c0 != cliff && c0 != water;
+            }
+            // 起点：入口格本身不可走时（例如白潮滩头这种没有平整范围的预留区，入口落在水面上）取入口半径内最近的可走格——
+            // 与寻路把终点落到最近可走格、运行时可达校验按入口半径判到达一致；半径内一格可走的都没有 = 被围住。
+            int start = -1;
+            int rs = Math.Max(4, a.EntryRadius);
+            for (int ring = 0; ring <= rs && start < 0; ring++)
+            {
+                for (int dy = -ring; dy <= ring && start < 0; dy++)
+                {
+                    for (int dx = -ring; dx <= ring && start < 0; dx++)
+                    {
+                        int sx = ex + dx;
+                        int sy = ey + dy;
+                        if (Math.Max(Math.Abs(dx), Math.Abs(dy)) == ring && sx >= 0 && sy >= 0 && sx < n && sy < n && Walk(sx, sy))
+                        {
+                            start = sy * n + sx;
+                        }
+                    }
+                }
+            }
+            if (start < 0)
+            {
+                return false;
+            }
+            var seen = new bool[n * n];
+            var stack = new Stack<int>();
+            var next = new int[4];
+            var far = new long[4];
+            seen[start] = true;
+            stack.Push(start);
+            while (stack.Count > 0)
+            {
+                int k = stack.Pop();
+                reached++;
+                int kx = k % n;
+                int ky = k / n;
+                if (kx == 0 || ky == 0 || kx == n - 1 || ky == n - 1)
+                {
+                    return true;
+                }
+                int m = 0;
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = kx + (d == 0 ? 1 : d == 1 ? -1 : 0);
+                    int ny = ky + (d == 2 ? 1 : d == 3 ? -1 : 0);
+                    int idx = ny * n + nx;
+                    if (!seen[idx] && Walk(nx, ny))
+                    {
+                        seen[idx] = true;
+                        next[m] = idx;
+                        far[m] = (long)(nx - r) * (nx - r) + (long)(ny - r) * (ny - r);
+                        m++;
+                    }
+                }
+                // 离原点近的先压栈，远的后压、先弹出（确定：同距离按方向序）。
+                for (int i = 1; i < m; i++)
+                {
+                    for (int j = i; j > 0 && far[j - 1] > far[j]; j--)
+                    {
+                        (far[j - 1], far[j]) = (far[j], far[j - 1]);
+                        (next[j - 1], next[j]) = (next[j], next[j - 1]);
+                    }
+                }
+                for (int i = 0; i < m; i++)
+                {
+                    stack.Push(next[i]);
                 }
             }
             return false;

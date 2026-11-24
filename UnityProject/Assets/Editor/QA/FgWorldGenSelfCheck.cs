@@ -1133,6 +1133,15 @@ namespace GameLogic.EditorTools
             (42, 4, "earth", 0, 0, 0x48C70F151F70AAB7UL),
             (42, 4, "earth", 3, -2, 0xDD3B8007C1F7214BUL),
             (42, 4, "earth", -4, 4, 0xF73CC064910E6A81UL),
+            // 2026-11-24 FG15-QA-03：生成器 v5（锚点粗粒度连通性判定）补旅程种子 1 / 42 的核心区块基准（两个种子都不需要换候选：与 v4 相同；50 个种子的全量基准在 FgSeedSuiteBaseline.tsv）。
+            (1, 5, "earth", 0, 0, 0x321C6D2380672B29UL),
+            (1, 5, "earth", -1, -1, 0x3FD7FE7335FDF84CUL),
+            (42, 5, "earth", 0, 0, 0x48C70F151F70AAB7UL),
+            (42, 5, "earth", 3, -2, 0xDD3B8007C1F7214BUL),
+            (42, 5, "earth", -4, 4, 0xF73CC064910E6A81UL),
+            // FG15-QA-03 修复轮：FGJ-SEED-17（种子测试集第 3 个旅程种子）的核心区块与第一个领地中心区块（值与 FgSeedSuiteBaseline.tsv 的 17 / v5 行相同），漏补会让该旅程“种子”一步失败。
+            (17, 5, "earth", 0, 0, 0x1C3BE4C18AD744F6UL),
+            (17, 5, "earth", -16, 5, 0x05F50D85A1BB51E0UL),
         };
 
         private static readonly (int seed, int version, string surface, int cx, int cy)[] BaselineKeys =
@@ -1149,6 +1158,9 @@ namespace GameLogic.EditorTools
             (1, 3, "earth", 0, 0), (1, 3, "earth", -1, -1), (42, 3, "earth", 0, 0), (42, 3, "earth", 3, -2), (42, 3, "earth", -4, 4),
             // FG11-E2E-01：生成器 v4（FG11-REG-01 湖心水环 + 堤道）上线时同样没补旅程种子的基准，从主菜单新建的旅程在“种子”一步失败；补种子 1 / 42 的核心区块。
             (1, 4, "earth", 0, 0), (1, 4, "earth", -1, -1), (42, 4, "earth", 0, 0), (42, 4, "earth", 3, -2), (42, 4, "earth", -4, 4),
+            // FG15-QA-03：生成器 v5 上线同时补旅程种子 1 / 42 的核心区块（吸取 v3 / v4 上线漏补、旅程“种子”一步失败的教训）。
+            (1, 5, "earth", 0, 0), (1, 5, "earth", -1, -1), (42, 5, "earth", 0, 0), (42, 5, "earth", 3, -2), (42, 5, "earth", -4, 4),
+            (17, 5, "earth", 0, 0), (17, 5, "earth", -16, 5),
         };
 
         private static ulong BaselineHash(int seed, int version, string surface, int cx, int cy)
@@ -1800,7 +1812,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>生成器版本表：原样写出 <paramref name="rows"/>，对 v1 行套用 <paramref name="v1Patch"/>（字段名 = 表列名）。</summary>
-        private static ByteBuf VersionBuf(List<WorldGenVersion> rows, params (string field, object value)[] v1Patch) =>
+        internal static ByteBuf VersionBuf(List<WorldGenVersion> rows, params (string field, object value)[] v1Patch) =>
             VersionBufPlus(rows, 0, null, v1Patch);
 
         /// <summary>同上；<paramref name="extraVersion"/> &gt; 0 时再追加一行：复制 v1、版本号改为 extraVersion，并套用 <paramref name="extraPatch"/>。</summary>

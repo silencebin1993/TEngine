@@ -616,25 +616,24 @@ namespace GameLogic.EditorTools.JourneyBots
             CombatKernel k = Home.Kernel;
             int t = c.GetInt("tt");
             long hp = (long)(Hp(k, t) * 100f);
-            long last = c.GetLong("beam.last");
-            if (last == 0)
+            // DEBT-EMGREXIT-02（FG15-QA-03）：按攻击结果事件计段（出手者 = T 车的编队攻击“命中”），不再按目标掉血计——自卫、余火同时打在目标上不会被算进切割束段数。
+            int hits = GameRoot.HomeValley.SquadCommands.HitOutcomes(c.GetInt("m.t"));
+            if (c.GetInt("beam.init") == 0)
             {
-                c.SetLong("beam.last", hp);
+                c.SetInt("beam.init", 1);
+                c.SetInt("beam.h0", hits);
+                c.SetLong("beam.hp0", hp);
                 return StepOutcome.Wait;
             }
             double now = GameClock.GameSeconds;
-            if (hp < last)
+            if (c.Get("beam.t0", string.Empty).Length == 0 && hits > c.GetInt("beam.h0"))
             {
-                c.SetLong("beam.last", hp);
-                if (c.Get("beam.t0", string.Empty).Length == 0)
-                {
-                    c.Set("beam.t0", now.ToString("R", CultureInfo.InvariantCulture));
-                    c.SetLong("beam.hp0", last);
-                }
-                else
-                {
-                    c.SetInt("beam.n", c.GetInt("beam.n") + 1);
-                }
+                c.Set("beam.t0", now.ToString("R", CultureInfo.InvariantCulture));
+                c.SetInt("beam.h1", hits); // 第一段（之后的段数 = 此后新增的命中结果事件）
+            }
+            if (c.Get("beam.t0", string.Empty).Length > 0)
+            {
+                c.SetInt("beam.n", hits - c.GetInt("beam.h1"));
             }
             if (c.Get("beam.t0", string.Empty).Length == 0)
             {
@@ -649,9 +648,9 @@ namespace GameLogic.EditorTools.JourneyBots
             float dealt = (c.GetLong("beam.hp0") - hp) / 100f;
             if (n < 5 || n > 7)
             {
-                return StepOutcome.Fail($"切割束第一段之后 {F(now - t0, "0.##")} 游戏秒切了 {n} 段（应 5～7：每 0.5 秒一段，emg.trig.beam_interval）；累计伤害 {F(dealt)}");
+                return StepOutcome.Fail($"切割束第一段之后 {F(now - t0, "0.##")} 游戏秒切了 {n} 段（按 T 车的攻击结果事件计；应 5～7：每 0.5 秒一段，emg.trig.beam_interval）；目标累计掉血 {F(dealt)}");
             }
-            return FgjEmg3Journey.Cleared(c, StepOutcome.Done($"T 车切割束：第一段之后 {F(now - t0, "0.##")} 游戏秒又切 {n} 段（每 0.5 秒一段，P9），累计伤害 {F(dealt)}"), "tt");
+            return FgjEmg3Journey.Cleared(c, StepOutcome.Done($"T 车切割束：第一段之后 {F(now - t0, "0.##")} 游戏秒又切 {n} 段（按 T 车的攻击结果事件计，出手者 = T 车；每 0.5 秒一段，P9），目标累计掉血 {F(dealt)}"), "tt");
         }
 
         // ── ⑤ 场的进场 / 离场 ───────────────────────────────────────────────────

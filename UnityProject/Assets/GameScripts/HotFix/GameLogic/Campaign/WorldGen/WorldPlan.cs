@@ -104,6 +104,13 @@ namespace GameLogic.Campaign.WorldGen
 
         /// <summary>FG8-GEN-02（生成器 v3 起）：手工锚点（表顺序）；v1 / v2 为空。</summary>
         public readonly List<PlannedAnchor> Anchors = new List<PlannedAnchor>();
+
+        /// <summary>FG15-QA-03（生成器 v5 起，FGR-GEN-090 / DEBT-FG8GEN02-09）：粗粒度连通性判定过的锚点数（v1～v4 为 0）。</summary>
+        public int EscapeChecked { get; internal set; }
+        /// <summary>同上：因为候选被地形围住而按子种子换过候选的锚点 → 最终从第几次候选开始试探。</summary>
+        public readonly Dictionary<string, int> EscapeRegen = new Dictionary<string, int>(StringComparer.Ordinal);
+        /// <summary>同上：全部子种子候选都被围住、保留原位置的锚点（运行时可达校验写原因，种子测试集报失败）。</summary>
+        public readonly List<string> EscapeFailed = new List<string>();
         /// <summary>FG8-GEN-02：领地内危害区；v1 / v2 为空（那时危害按整块领地标记）。</summary>
         public readonly List<PlannedHazardZone> HazardZones = new List<PlannedHazardZone>();
         /// <summary>FG8-GEN-02：领地 ID → 这个版本的领地模板；v1 / v2 为空。</summary>
@@ -268,7 +275,10 @@ namespace GameLogic.Campaign.WorldGen
             Compute(worldSeed, version, preset != null ? WorldSettings.FromPreset(preset, version?.Version ?? 1) : null, coreX, coreY);
 
         /// <summary>同上，世界设置已解析（v2 分项设置或 v1 预设）。只算领地、河流、矿带；起始区保证由 <see cref="StartZoneGuarantee"/> 接着算。</summary>
-        public static WorldPlan Compute(int worldSeed, WorldGenVersion version, WorldSettings settings, int coreX, int coreY)
+        /// <param name="anchorFirstAttempt">FG15-QA-03（v5 起，FGR-GEN-090 / DEBT-FG8GEN02-09）：锚点 ID → 从第几次子种子候选开始试探；
+        /// 只由 <see cref="WorldGenContext.Build"/> 的粗粒度连通性判定在“上一次候选被地形围住”时传入（种子的纯函数），null = 都从第 0 次开始。</param>
+        public static WorldPlan Compute(int worldSeed, WorldGenVersion version, WorldSettings settings, int coreX, int coreY,
+            IReadOnlyDictionary<string, int> anchorFirstAttempt = null)
         {
             if (version == null)
             {
@@ -376,7 +386,7 @@ namespace GameLogic.Campaign.WorldGen
             plan.PlanRivers(seed, version, zones);
             plan.PlanBelts(seed, version, zones);
             // FG8-GEN-02（v3 起）：手工锚点（平整范围）、领地地貌风格、领地内危害区。版本行没有模板 / 锚点集合时什么也不做（v1 / v2 结果不变）。
-            TerritoryPlanner.Plan(plan, seed, version, zones);
+            TerritoryPlanner.Plan(plan, seed, version, zones, anchorFirstAttempt);
             plan.NaturalZones = zones.ToArray();
             plan.Zones = plan.NaturalZones;
             return plan;

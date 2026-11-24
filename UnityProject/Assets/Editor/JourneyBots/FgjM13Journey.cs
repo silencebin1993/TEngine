@@ -67,14 +67,20 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private static RegionSquadCommandSystem Squad => GameRoot.HomeValley?.SquadCommands;
 
-        public static JourneyDef Build()
+        /// <summary>FG15-QA-03（FGR-GEN-091“其中 3 个种子跑完整的旅程机器人”）：同一套 M13 步骤按另一个种子新建战役（主菜单 → 结局）。
+        /// 种子 42 就是 FGJ-M13 本身；其它种子的 ID 是 FGJ-SEED-{种子}（在 <see cref="JourneyCatalog"/> 登记，种子取 <see cref="FgSeedSuiteSelfCheck.JourneySeeds"/>）。</summary>
+        public static string SeedJourneyId(int seed) => seed == TestSeed ? Id : "FGJ-SEED-" + seed.ToString(CultureInfo.InvariantCulture);
+
+        public static JourneyDef Build() => Build(TestSeed);
+
+        public static JourneyDef Build(int seed)
         {
             var steps = new List<JourneyStep>
             {
                 S("play", "打开 main.unity 并进入 Play", 90, JourneyCommon.EnterPlay, TickPlay),
                 S("menu_new", "主菜单点“新建”", 150, null, JourneyCommon.TickMenuNew, retries: 1),
-                S("new_game", "存档槽 → 新游戏设置（种子 = 固定测试种子 42，难度标准）→ 点“开始” → 进入归还谷地", 150, null, JourneyCommon.TickNewGame),
-                S("seed", "种子进了存档；生成结果与该种子的基准一致", 30, null, c => JourneyCommon.TickSeed(c, TestSeed)),
+                S("new_game", $"存档槽 → 新游戏设置（种子 = 固定测试种子 {seed}，难度标准）→ 点“开始” → 进入归还谷地", 150, null, JourneyCommon.TickNewGame),
+                S("seed", "种子进了存档；生成结果与该种子的基准一致", 30, null, c => JourneyCommon.TickSeed(c, c.Seed)),
                 S("workers", "记下开局两台机器", 10, null, FgjM3Common.TickWorkers),
                 S("speed3", "按 3 倍速键", 10, c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), FgjM1Journey.TickSpeed3, retries: 1),
                 S("m13_fix", "开局夹具（DEBT-FG13E2E01-01）：主线“巨构蓝图”经正式任务完成入口完成 → 第三幕、建造菜单解锁返航工地；前四个巨构阶段记为已完工（真实五阶段由 FgMegastructureSelfCheck D1 覆盖）；" +
@@ -136,9 +142,9 @@ namespace GameLogic.EditorTools.JourneyBots
             steps.InsertRange(steps.FindIndex(x => x.Id == "purge_done"), PurgeWaveSteps());
             return new JourneyDef
             {
-                Id = Id,
-                Title = "M13 出口：放返航工地、第五阶段完工 → 点亮信标、揭示 → 守住三波清洗 → 摧毁白潮滩头锚点 → 击败先遣旗舰（阶段三反向接入夺回）→ 结局 → 结算点“继续”",
-                Seed = TestSeed,
+                Id = SeedJourneyId(seed),
+                Title = (seed == TestSeed ? string.Empty : $"种子测试集（种子 {seed}）：") + "M13 出口：放返航工地、第五阶段完工 → 点亮信标、揭示 → 守住三波清洗 → 摧毁白潮滩头锚点 → 击败先遣旗舰（阶段三反向接入夺回）→ 结局 → 结算点“继续”",
+                Seed = seed,
                 TotalTimeoutSeconds = 3000,
                 OnFinish = Cleanup,
                 Version = 1,
@@ -184,7 +190,7 @@ namespace GameLogic.EditorTools.JourneyBots
         private static string QuestState(string id) => CampaignObjectiveTracker.FindQuest(St, id)?.State.ToString() ?? "无";
 
         private static StepOutcome TickPlay(JourneyContext c) =>
-            JourneyCommon.TickPlay(c, TestSeed, () =>
+            JourneyCommon.TickPlay(c, c.Seed, () =>
             {
                 FgjM2Common.ResetSampling();
                 FgjM3Common.ResetSampling();
@@ -1209,7 +1215,8 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return StepOutcome.Fail($"槽位 {slot + 1} 不是结局存档：读取 {disk.Outcome}、结局 {(disk.Success && EndingService.Reached(disk.State))}、后日谈 {disk.State?.Progress.IsPostgame}");
             }
-            string dir = HandoffDir;
+            // FG15-QA-03：种子测试集的同步骤旅程（FGJ-SEED-*）交接到各自的目录，不覆盖 FGJ-M14 读的那一份。
+            string dir = c.Journey.Id == Id ? HandoffDir : HandoffDir + "-" + c.Journey.Id;
             Directory.CreateDirectory(dir);
             File.Copy(CampaignSaveService.SlotPath(slot), Path.Combine(dir, HandoffSave), true);
             JourneyCheckpoints.EnvInfo env = JourneyCheckpoints.EnvInfo.Current();

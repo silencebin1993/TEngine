@@ -205,7 +205,7 @@ namespace GameLogic.EditorTools
             public float MouseScrollDelta => 0f;
         }
 
-        private static WorldGenContext Ctx(int seed, string code = WorldGenContent.DefaultPresetId, int version = -1)
+        internal static WorldGenContext Ctx(int seed, string code = WorldGenContent.DefaultPresetId, int version = -1)
         {
             int v = version < 0 ? WorldGenVersions.Current : version;
             return WorldGenContext.Build(seed, v, WorldSettings.Resolve(v, code), new GridCell(0, 0), ChunkSize);
@@ -233,7 +233,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>核心周围 [lo, hi] 区块范围的地形 / 污染（Burst 整块生成）。</summary>
-        private sealed class Region
+        internal sealed class Region
         {
             public readonly Dictionary<long, (byte[] t, byte[] p)> Chunks = new Dictionary<long, (byte[] t, byte[] p)>();
 
@@ -345,7 +345,7 @@ namespace GameLogic.EditorTools
         }
 
         /// <summary>对一个世界独立验证四级保证；返回不满足的原因（空 = 全部满足）。</summary>
-        private static List<string> VerifyStart(WorldGenContext ctx, Region reg, Dictionary<string, bool> itemOk)
+        internal static List<string> VerifyStart(WorldGenContext ctx, Region reg, Dictionary<string, bool> itemOk)
         {
             var why = new List<string>();
             StartGuaranteeReport rep = ctx.Plan.StartReport;
@@ -583,7 +583,7 @@ namespace GameLogic.EditorTools
 
         // ── C. 局部重生成（FGR-GEN-031 末条 / FGR-GEN-090）────────────────────────────────
 
-        private static ByteBuf GuaranteeBuf(IEnumerable<(string item, string terrain, int radius, int cells, int sq, int stamp)> rows, string set = "g2")
+        internal static ByteBuf GuaranteeBuf(IEnumerable<(string item, string terrain, int radius, int cells, int sq, int stamp)> rows, string set = "g2")
         {
             var list = rows.ToList();
             var buf = new ByteBuf();
@@ -603,7 +603,7 @@ namespace GameLogic.EditorTools
             return buf;
         }
 
-        private static List<(string item, string terrain, int radius, int cells, int sq, int stamp)> RealGuarantees() =>
+        internal static List<(string item, string terrain, int radius, int cells, int sq, int stamp)> RealGuarantees() =>
             WorldGenContent.GuaranteesFor(WorldGenContent.Version(2)).Select(x => (x.Item, x.Terrain, x.Radius, x.MinCells, x.MinSquare, x.StampRadius)).ToList();
 
         private static void CheckLocalRegeneration()
@@ -779,7 +779,7 @@ namespace GameLogic.EditorTools
         /// 湖里零星几格的自然小岛不是“领地”，寻路目标不取它（生成器 v4 湖心平台的水环盖住了澄净领地中心，最近的可走格是 9 格的小岛，种子 1 实测）。
         /// </summary>
         /// <summary>寻路目标所在的可走连通块至少这么多格（8×8，一支小队能站下）。</summary>
-        private const int MinTargetPatch = 64;
+        internal const int MinTargetPatch = 64;
 
         private static bool PatchAtLeast(WorldGenContext ctx, int x, int y, int min)
         {
@@ -811,7 +811,7 @@ namespace GameLogic.EditorTools
             return walkable >= min;
         }
 
-        private static bool NearestWalkable(WorldGenContext ctx, int x, int y, int r, out int wx, out int wy)
+        internal static bool NearestWalkable(WorldGenContext ctx, int x, int y, int r, out int wx, out int wy)
         {
             byte cliff = ctx.Source.Params.CodeCliff;
             byte water = ctx.Source.Params.CodeWater;

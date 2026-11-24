@@ -1273,13 +1273,30 @@ namespace GameLogic.EditorTools
 
         // ── EMGR-NAV-01 种子 42 第一次远征（FG-GAP-136）──────────────────────────────
 
+        /// <summary>一次“新档第一次远征破碎都市”的结果（种子 42 段与种子测试集的行军截断率共用）。</summary>
+        private sealed class MarchRun
+        {
+            public bool Prereq;
+            public string PrereqWhy;
+            public bool AtSite;
+            public bool Quiet;
+            public bool EverHalted;
+            public double Seconds;
+            public int MaxStrike;
+            public int Retries;
+            /// <summary>第一次判“路线被截断”或第一次有成员以“受阻”放弃命令时，全队的位置（种子测试集列出截断位置）。</summary>
+            public string CutAt;
+            public readonly List<string> Diag = new List<string>();
+        }
+
         /// <summary>
-        /// 种子 42 新档第一次远征破碎都市（FGJ-M8 开局夹具同一支四台：ERC-001 ×1 + ERC-003 ×3，核心旁出厂、真实信号覆盖）：
+        /// 新档第一次远征破碎都市（FGJ-M8 开局夹具同一支四台：ERC-001 ×1 + ERC-003 ×3，核心旁出厂、真实信号覆盖）：
         /// 整队走到锚点进入地点，途中不判“路线被截断”、不出截断提示。逐步记下每台的受阻计数 / 重寻记号与第一次受阻、放弃时的位置与周围格网（根因写进证据）。
         /// </summary>
-        private static void CheckSeed42FirstMarch()
+        private static MarchRun FirstMarch(int seed)
         {
-            CampaignState s = NewWorld(42);
+            var run = new MarchRun();
+            CampaignState s = NewWorld(seed);
             // FGJ-M8 开局：两台工人先修好受损的仓库、信号塔、发电机（信号塔通电 +5 带宽、覆盖按真实信号塔）——这里直接记为修好（测试捷径，登记在证据里）。
             foreach (BuildingRecord b in s.BuildingRecords.Where(b => b != null && b.RegionId == HomeValleyLayout.RegionId && (b.BuildingTypeId == HomeValleyLayout.BuildingTypeGenerator
                          || b.BuildingTypeId == HomeValleyLayout.BuildingTypeWarehouse || b.BuildingTypeId == HomeValleyLayout.BuildingTypeSignalTower)).ToList())
@@ -1313,9 +1330,10 @@ namespace GameLogic.EditorTools
             ExpeditionDepartureService.DepartureResult dep = ExpeditionDepartureService.TryDepart(ids.ToArray(), true, ExpeditionDepartureService.ExpeditionTarget.SilentRuins);
             if (ids.Count != team.Length || !dep.Success)
             {
-                Fail($"种子 42 第一次远征前提：出厂 {ids.Count}/{team.Length} 台、出发 {dep.Outcome}（{string.Join("，", dep.Reasons ?? Array.Empty<string>())}）");
-                return;
+                run.PrereqWhy = $"种子 {seed} 第一次远征前提：出厂 {ids.Count}/{team.Length} 台、出发 {dep.Outcome}（{string.Join("，", dep.Reasons ?? Array.Empty<string>())}）";
+                return run;
             }
+            run.Prereq = true;
             int cues0 = FeedbackCues.CountOf(FeedbackCueId.ExpeditionMarchHalted);
             int n = ids.Count;
             var maxStrike = new int[n];
@@ -1364,23 +1382,107 @@ namespace GameLogic.EditorTools
                     hadMove[k] = has && c.Kind == CombatCommandKind.Move;
                     lastStrikes[k] = strikes;
                 }
+                if ((everHalted || gaveUp.Any(g => g != null)) && run.CutAt == null && home != null)
+                {
+                    run.CutAt = string.Join("、", ids.Select(id => home.TryGetMachinePosition(id, out Vector2 p)
+                        ? $"{id}@({p.x:0},{p.y:0}) 区块 ({Mathf.FloorToInt(p.x / 32f)},{Mathf.FloorToInt(p.y / 32f)})" : $"{id}@?"));
+                }
                 return everHalted;
             }, 40000, chunk: 1);
-            double seconds = (GameClock.Ticks - t0) / (double)GameClock.StepHz;
+            run.Seconds = (GameClock.Ticks - t0) / (double)GameClock.StepHz;
             for (int k = 0; k < n; k++)
             {
                 if (firstStrike[k] != null || gaveUp[k] != null)
                 {
-                    Line($"  · 诊断：成员 {ids[k]}（{Rec(ids[k])?.ChassisId}）最多连续受阻 {maxStrike[k]} 次、从当前位置重寻 {retries[k]} 次；第一次受阻 {firstStrike[k]}；放弃命令 {gaveUp[k] ?? "无"}");
+                    run.Diag.Add($"  · 诊断（种子 {seed}）：成员 {ids[k]}（{Rec(ids[k])?.ChassisId}）最多连续受阻 {maxStrike[k]} 次、从当前位置重寻 {retries[k]} 次；第一次受阻 {firstStrike[k]}；放弃命令 {gaveUp[k] ?? "无"}");
                 }
             }
             CampaignState after = CampaignSession.Current;
-            bool atSite = done && !everHalted && ExpeditionMarchService.Current(after).Phase == ExpeditionMarchService.PhaseAtSite
-                          && ids.All(id => Rec(id)?.RegionId == FracturedCityLayout.RegionId);
-            bool quiet = FeedbackCues.CountOf(FeedbackCueId.ExpeditionMarchHalted) == cues0 && gaveUp.All(g => g == null);
-            Expect(atSite && quiet,
-                $"种子 42 新档第一次远征破碎都市（ERC-001 ×1 + ERC-003 ×3，FGJ-M8 开局同一支）：{seconds:0.0} 游戏秒整队走到锚点并进入地点（{atSite}），" +
-                $"途中没有成员放弃命令、不判“路线被截断”、不出截断提示（{quiet}）；受阻计数最多 {maxStrike.Max()} 次、从当前位置重寻共 {retries.Sum()} 次（FG-GAP-136）");
+            run.EverHalted = everHalted;
+            run.AtSite = done && !everHalted && ExpeditionMarchService.Current(after).Phase == ExpeditionMarchService.PhaseAtSite
+                         && ids.All(id => Rec(id)?.RegionId == FracturedCityLayout.RegionId);
+            run.Quiet = FeedbackCues.CountOf(FeedbackCueId.ExpeditionMarchHalted) == cues0 && gaveUp.All(g => g == null);
+            run.MaxStrike = maxStrike.Max();
+            run.Retries = retries.Sum();
+            if (!run.AtSite && run.CutAt == null)
+            {
+                run.CutAt = $"没在 40000 步（{40000 / (double)GameClock.StepHz:0} 游戏秒）内走到（行军阶段 {ExpeditionMarchService.Current(after).Phase}）";
+            }
+            return run;
+        }
+
+        private static void CheckSeed42FirstMarch()
+        {
+            MarchRun r = FirstMarch(42);
+            if (!r.Prereq)
+            {
+                Fail(r.PrereqWhy);
+                return;
+            }
+            foreach (string d in r.Diag)
+            {
+                Line(d);
+            }
+            Expect(r.AtSite && r.Quiet,
+                $"种子 42 新档第一次远征破碎都市（ERC-001 ×1 + ERC-003 ×3，FGJ-M8 开局同一支）：{r.Seconds:0.0} 游戏秒整队走到锚点并进入地点（{r.AtSite}），" +
+                $"途中没有成员放弃命令、不判“路线被截断”、不出截断提示（{r.Quiet}）；受阻计数最多 {r.MaxStrike} 次、从当前位置重寻共 {r.Retries} 次（FG-GAP-136）");
+        }
+
+        /// <summary>
+        /// FG15-QA-03 种子测试集·行军截断率（FG-GAP-136 防回归）：种子测试集 50 个种子各开一份新档，按种子 42 段同一支四台、同一出发入口
+        /// 真实行军到破碎都市（锚点按种子生成）。统计判“路线被截断”或成员以“受阻”放弃命令的种子数；任一种子截断即列出种子、全队位置与区块。
+        /// 单段：bash tools/unity-validate.sh --segment FgSeedSuiteMarchSelfCheck（已并入 RunAll）。
+        /// </summary>
+        public static int RunSeedSuiteMarch(StringBuilder report) => RunSteps(report,
+            $"\n[种子测试集·行军截断率] {FgWorldGenHomeSelfCheck.SeedSet.Length} 个种子新档第一次远征破碎都市：整队走到、不判“路线被截断”；截断即列出种子与位置（FG15-QA-03 / FG-GAP-136）",
+            CheckSeedSuiteMarch);
+
+        private static void CheckSeedSuiteMarch()
+        {
+            int[] seeds = FgWorldGenHomeSelfCheck.SeedSet;
+            var cut = new List<string>();
+            var pre = new List<string>();
+            int arrived = 0;
+            int strikes = 0;
+            int retries = 0;
+            double worst = 0;
+            double sum = 0;
+            int worstSeed = 0;
+            var sw = Stopwatch.StartNew();
+            foreach (int seed in seeds)
+            {
+                MarchRun r = FirstMarch(seed);
+                if (!r.Prereq)
+                {
+                    pre.Add(r.PrereqWhy);
+                    continue;
+                }
+                sum += r.Seconds;
+                if (r.Seconds > worst)
+                {
+                    worst = r.Seconds;
+                    worstSeed = seed;
+                }
+                strikes = Math.Max(strikes, r.MaxStrike);
+                retries += r.Retries;
+                if (r.AtSite && r.Quiet)
+                {
+                    arrived++;
+                    continue;
+                }
+                cut.Add($"种子 {seed}｜表面 earth｜{(r.EverHalted ? "判“路线被截断”" : r.Quiet ? "没走到" : "成员以受阻放弃命令")}｜位置 {r.CutAt}");
+                foreach (string d in r.Diag)
+                {
+                    Line(d);
+                }
+            }
+            sw.Stop();
+            int n = seeds.Length;
+            int ran = n - pre.Count;
+            Expect(pre.Count == 0 && cut.Count == 0 && arrived == n,
+                $"FG-GAP-136 行军截断率（种子测试集）：{n} 个种子新档第一次远征破碎都市，{arrived}/{ran} 整队走到锚点进入地点，截断 {cut.Count}/{ran}（{(ran > 0 ? cut.Count * 100.0 / ran : 0):0.#}%）；" +
+                $"行军平均 {(ran > 0 ? sum / ran : 0):0.0} 游戏秒、最长 {worst:0.0}（种子 {worstSeed}），受阻计数最多 {strikes} 次、从当前位置重寻共 {retries} 次；实耗 {sw.Elapsed.TotalSeconds:0} 秒（Editor batchmode）" +
+                (pre.Count == 0 ? string.Empty : "——出发前提失败：" + string.Join("；", pre.Take(5))) + (cut.Count == 0 ? string.Empty : "——截断：" + string.Join("；", cut.Take(10))));
         }
 
         /// <summary>诊断用：单位位置、寻路状态、剩余路线、下 3 个路点，以及周围 7×7 格的通行（# 不可走、@ 本机所在格）。</summary>

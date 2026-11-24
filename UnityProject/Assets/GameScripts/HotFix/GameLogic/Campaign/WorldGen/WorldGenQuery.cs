@@ -26,7 +26,80 @@ namespace GameLogic.Campaign.WorldGen
         public string Identity => string.Concat(Seed.ToString(System.Globalization.CultureInfo.InvariantCulture), "|v", Version.ToString(System.Globalization.CultureInfo.InvariantCulture),
             "|", Settings?.Id, "|", Core.ToString());
 
-        /// <summary>组装：规划层 → 起始区保证（写保证点）→ 地形来源。纯函数。</summary>
+        /// <summary>
+        /// FG15-QA-03（生成器 v5 起，FGR-GEN-090 第 2 条“校验失败时对失败项做确定性的局部重生成并写日志”，DEBT-FG8GEN02-09）：
+        /// 非 Demo 锚点（两个室内入口、洗礼平台、白潮滩头）逐个做与存档无关的粗粒度连通性判定（<see cref="TerritoryPlanner.EscapesLocally"/>）；
+        /// 被地形围住的只对这一个锚点按子种子（种子, 锚点序号, 次数）换下一个候选、整份规划按同样的输入重算（种子的纯函数，与读档先后、玩家修改无关），
+        /// 直到都通过或该锚点的 planMaxAttempts 次候选用完（用完 = 回到原位置、写进 <see cref="WorldPlan.EscapeFailed"/> 与错误日志，运行时可达校验写原因、不软锁）。
+        /// 不需要换候选时（种子测试集 50 个种子 × 世界设置组合全部如此）结果与 v4 逐格相同，只多几毫秒判定。
+        /// </summary>
+        private static void ResolveEscapes(int seed, int version, WorldGenVersion row, WorldSettings settings, GridCell core, int chunkSize, ref WorldPlan plan, ref WorldTerrainSource source)
+        {
+            int maxAttempts = Math.Max(1, row.PlanMaxAttempts);
+            var first = new Dictionary<string, int>(StringComparer.Ordinal);
+            var failed = new List<string>();
+            var log = new List<string>();
+            int checkedCount = 0;
+            // 每一轮有改动 = 某个锚点的候选序号只增不减（上限 maxAttempts）或它进了 failed，所以最多 锚点数 ×（maxAttempts + 1）轮就收敛；
+            // 上限按这个取，循环总是以“最后一份规划全部判过、没有改动”结束（只按 maxAttempts 取时，后面的锚点被前面的换位挤进围圈会漏判）。
+            int escapeAnchors = 0;
+            foreach (PlannedAnchor a in plan.Anchors)
+            {
+                escapeAnchors += TerritoryPlanner.NeedsEscapeCheck(a) ? 1 : 0;
+            }
+            int passCap = (escapeAnchors + 1) * (maxAttempts + 1);
+            for (int pass = 0; pass <= passCap; pass++)
+            {
+                bool changed = false;
+                checkedCount = 0;
+                foreach (PlannedAnchor a in plan.Anchors)
+                {
+                    if (!TerritoryPlanner.NeedsEscapeCheck(a) || failed.Contains(a.Id))
+                    {
+                        continue;
+                    }
+                    checkedCount++;
+                    if (TerritoryPlanner.EscapesLocally(source, a, out int reached))
+                    {
+                        continue;
+                    }
+                    int next = a.Attempts + 1;
+                    if (a.Fallback || next >= maxAttempts)
+                    {
+                        failed.Add(a.Id);
+                        changed |= first.Remove(a.Id);
+                        log.Add($"锚点 {a.Id}：{maxAttempts} 次子种子候选都被地形围住（最后一次入口 ({a.EntryX},{a.EntryY}) 漫水 {reached} 格），回到原位置，由运行时可达校验写原因（FGR-GEN-090）"); // loc-ignore: 开发者自检 / 诊断文本
+                        continue;
+                    }
+                    first[a.Id] = next;
+                    changed = true;
+                    log.Add($"锚点 {a.Id}：第 {a.Attempts + 1} 次候选原点 ({a.OriginX},{a.OriginY}) 入口 ({a.EntryX},{a.EntryY}) 被地形围住（漫水 {reached} 格碰不到判定框边），按子种子换第 {next + 1} 次候选（粗粒度连通性判定，FGR-GEN-090 局部重生成）"); // loc-ignore: 开发者自检 / 诊断文本
+                }
+                if (!changed)
+                {
+                    break;
+                }
+                plan = WorldPlan.Compute(seed, row, settings, core.X, core.Y, first);
+                if (settings == null || !settings.NoStartGuarantee)
+                {
+                    StartZoneGuarantee.Resolve(plan, row, settings, core, chunkSize);
+                }
+                source = new WorldTerrainSource(seed, version, settings, WorldGenContent.Surface(WorldGenContent.EarthSurfaceId), core, chunkSize, plan);
+            }
+            plan.EscapeChecked = checkedCount + failed.Count;
+            foreach (KeyValuePair<string, int> kv in first)
+            {
+                plan.EscapeRegen[kv.Key] = kv.Value;
+            }
+            plan.EscapeFailed.AddRange(failed);
+            plan.Log.AddRange(log);
+            foreach (string id in failed)
+            {
+                TEngine.Log.Warning($"[WorldGen] 种子 {seed} v{version}：锚点 {id} 的全部候选都被地形围住（粗粒度连通性判定），保留原位置"); // loc-ignore: 开发者自检 / 诊断文本
+            }
+        }
+
+        /// <summary>组装：规划层 → 起始区保证（写保证点）→ 地形来源 →（v5 起）锚点粗粒度连通性判定与换候选。纯函数。</summary>
         public static WorldGenContext Build(int seed, int version, WorldSettings settings, GridCell core, int chunkSize)
         {
             WorldGenVersion row = WorldGenContent.Version(version);
@@ -36,6 +109,10 @@ namespace GameLogic.Campaign.WorldGen
                 StartZoneGuarantee.Resolve(plan, row, settings, core, chunkSize); // FG14-SBX-02：沙盒“关闭保证”不放资源保证点、不出保证报告
             }
             var source = new WorldTerrainSource(seed, version, settings, WorldGenContent.Surface(WorldGenContent.EarthSurfaceId), core, chunkSize, plan);
+            if (version >= TerritoryPlanner.ReachRegenFromVersion && plan.Anchors.Count > 0)
+            {
+                ResolveEscapes(seed, version, row, settings, core, chunkSize, ref plan, ref source);
+            }
             return new WorldGenContext
             {
                 Seed = seed,
