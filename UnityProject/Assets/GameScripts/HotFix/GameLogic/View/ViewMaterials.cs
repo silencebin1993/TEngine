@@ -15,7 +15,7 @@ namespace GameLogic.View
     /// </summary>
     public static class ViewMaterials
     {
-        private const string StandardShader = "Standard";
+        private static string StandardShader => BinGames.Presentation.PresentationMaterials.ShaderName(BinGames.Presentation.PresentationMaterialUse.Lit); // PL-RP-02：随管线（Built-in = Standard / URP = URP Lit）
 
         private static readonly Dictionary<(string Shader, uint Color), Material> Cache = new Dictionary<(string, uint), Material>();
 
@@ -33,7 +33,14 @@ namespace GameLogic.View
             {
                 return existing;
             }
-            var material = new Material(Shader.Find(shaderName))
+            Shader shader = Shader.Find(shaderName);
+            if (shader == null)
+            {
+                // PL-RP-02：Player 里 shader 被剥离时不抛 ArgumentNullException，退到常驻包含的实例化无光照 shader（两套管线都能画）
+                Debug.LogError($"[ViewMaterials] 找不到 shader {shaderName}，退回 {BinGames.Presentation.PresentationMaterials.FallbackShader}");
+                shader = Shader.Find(BinGames.Presentation.PresentationMaterials.FallbackShader);
+            }
+            var material = new Material(shader)
             {
                 color = color,
                 name = $"ViewMaterial {shaderName} #{key:X8}",
