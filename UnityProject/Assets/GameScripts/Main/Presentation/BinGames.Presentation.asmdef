@@ -1,0 +1,21 @@
+{
+    "name": "BinGames.Presentation",
+    "rootNamespace": "BinGames.Presentation",
+    "references": [
+        "BinGames.Sim",
+        "BinGames.TerrainVisual",
+        "Unity.Burst",
+        "Unity.Collections",
+        "Unity.Mathematics",
+        "Unity.Jobs"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
