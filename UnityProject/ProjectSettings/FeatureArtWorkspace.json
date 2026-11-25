@@ -5433,6 +5433,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:13",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -5451,6 +5452,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:13",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -5622,6 +5624,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:14",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207",
                 "production/design/art-rules/asset-cards/mch_player_tracked_base.md"
@@ -5639,8 +5642,9 @@
             "notes": "；低矮宽大的履带车体，两条宽履带和装甲裙板，车体中央一个圆形转塔座，车体两侧各有一排收拢的散热鳍，能源核在车体中心，接入口在车顶一侧。",
             "designId": "mch_player_tracked_base",
             "faction": "玩家",
-            "requirementStatus": "待制作",
+            "requirementStatus": "已绑定",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:14",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207",
                 "production/design/art-rules/asset-cards/mch_player_tracked_base.md"
@@ -5825,7 +5829,7 @@
         {
             "id": "mch_player_hover",
             "parentId": "chassis",
-            "title": "维修悬浮",
+            "title": "维修悬浮（两栖）",
             "kind": "概念与需求",
             "sourceId": "mch_player_hover",
             "slotId": "",
@@ -5834,6 +5838,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:15",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -5843,7 +5848,7 @@
         {
             "id": "mch_player_hover_base",
             "parentId": "mch_player_hover",
-            "title": "维修悬浮 · 基础模型",
+            "title": "维修悬浮（两栖） · 基础模型",
             "kind": "成品模型",
             "sourceId": "mch_player_hover_base",
             "slotId": "custom.mch_player_hover_base",
@@ -5852,6 +5857,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:15",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -6065,6 +6071,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:16",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -6083,6 +6090,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:16",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -6233,6 +6241,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:17",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -6251,6 +6260,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:17",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -6401,6 +6411,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:18",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207",
                 "production/design/art-rules/asset-cards/mch_player_legged_base.md"
@@ -6420,6 +6431,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:18",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207",
                 "production/design/art-rules/asset-cards/mch_player_legged_base.md"
@@ -6757,6 +6769,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:28",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -6773,8 +6786,9 @@
             "notes": "载体：射弹。多管速射炮，三到六根并排短炮管，下方弹链供弹箱",
             "designId": "mch_player_repeater_base",
             "faction": "玩家",
-            "requirementStatus": "待制作",
+            "requirementStatus": "已绑定",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:28",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -6896,6 +6910,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:29",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -6914,6 +6929,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:29",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -7035,6 +7051,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:30",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -7053,6 +7070,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:30",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -7174,6 +7192,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:31",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -7192,6 +7211,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:31",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -7313,6 +7333,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:32",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -7331,6 +7352,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:32",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -7452,6 +7474,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:33",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -7470,6 +7493,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:33",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -7591,6 +7615,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:34",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -7609,6 +7634,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:34",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -7730,6 +7756,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:35",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -7748,6 +7775,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:35",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -7869,6 +7897,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:36",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -7887,6 +7916,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:36",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8008,6 +8038,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:37",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8026,6 +8057,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:37",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8138,7 +8170,7 @@
         {
             "id": "mch_player_spiked_armor",
             "parentId": "components",
-            "title": "尖刺外装",
+            "title": "爆炸反应装甲（原尖刺外装）",
             "kind": "概念与需求",
             "sourceId": "mch_player_spiked_armor",
             "slotId": "",
@@ -8147,6 +8179,7 @@
             "faction": "玩家",
             "requirementStatus": "已设计／槽位待复核",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:38",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8156,7 +8189,7 @@
         {
             "id": "mch_player_spiked_armor_base",
             "parentId": "mch_player_spiked_armor",
-            "title": "尖刺外装 · 基础模型",
+            "title": "爆炸反应装甲（原尖刺外装） · 基础模型",
             "kind": "成品模型",
             "sourceId": "mch_player_spiked_armor_base",
             "slotId": "custom.mch_player_spiked_armor_base",
@@ -8165,6 +8198,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:38",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8192,7 +8226,7 @@
         {
             "id": "mch_player_spiked_armor_morph",
             "parentId": "mch_player_spiked_armor",
-            "title": "尖刺外装 · 形变态",
+            "title": "爆炸反应装甲（原尖刺外装） · 形变态",
             "kind": "成品模型",
             "sourceId": "mch_player_spiked_armor_morph",
             "slotId": "custom.mch_player_spiked_armor_morph",
@@ -8213,7 +8247,7 @@
         {
             "id": "mch_player_spiked_armor_nozzle",
             "parentId": "mch_player_spiked_armor",
-            "title": "尖刺外装 · 喷口态",
+            "title": "爆炸反应装甲（原尖刺外装） · 喷口态",
             "kind": "成品模型",
             "sourceId": "mch_player_spiked_armor_nozzle",
             "slotId": "custom.mch_player_spiked_armor_nozzle",
@@ -8234,7 +8268,7 @@
         {
             "id": "mch_player_spiked_armor_coil",
             "parentId": "mch_player_spiked_armor",
-            "title": "尖刺外装 · 线圈态",
+            "title": "爆炸反应装甲（原尖刺外装） · 线圈态",
             "kind": "成品模型",
             "sourceId": "mch_player_spiked_armor_coil",
             "slotId": "custom.mch_player_spiked_armor_coil",
@@ -8286,6 +8320,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:39",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8304,6 +8339,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:39",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8425,6 +8461,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:40",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8443,6 +8480,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:40",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8564,6 +8602,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:41",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8582,6 +8621,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:41",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8694,7 +8734,7 @@
         {
             "id": "mch_player_sprayer",
             "parentId": "components",
-            "title": "喷洒器",
+            "title": "罐弹抛洒器（原喷洒器）",
             "kind": "概念与需求",
             "sourceId": "mch_player_sprayer",
             "slotId": "",
@@ -8703,6 +8743,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:42",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8712,7 +8753,7 @@
         {
             "id": "mch_player_sprayer_base",
             "parentId": "mch_player_sprayer",
-            "title": "喷洒器 · 基础模型",
+            "title": "罐弹抛洒器（原喷洒器） · 基础模型",
             "kind": "成品模型",
             "sourceId": "mch_player_sprayer_base",
             "slotId": "custom.mch_player_sprayer_base",
@@ -8721,6 +8762,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:42",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8748,7 +8790,7 @@
         {
             "id": "mch_player_sprayer_morph",
             "parentId": "mch_player_sprayer",
-            "title": "喷洒器 · 形变态",
+            "title": "罐弹抛洒器（原喷洒器） · 形变态",
             "kind": "成品模型",
             "sourceId": "mch_player_sprayer_morph",
             "slotId": "custom.mch_player_sprayer_morph",
@@ -8769,7 +8811,7 @@
         {
             "id": "mch_player_sprayer_nozzle",
             "parentId": "mch_player_sprayer",
-            "title": "喷洒器 · 喷口态",
+            "title": "罐弹抛洒器（原喷洒器） · 喷口态",
             "kind": "成品模型",
             "sourceId": "mch_player_sprayer_nozzle",
             "slotId": "custom.mch_player_sprayer_nozzle",
@@ -8790,7 +8832,7 @@
         {
             "id": "mch_player_sprayer_coil",
             "parentId": "mch_player_sprayer",
-            "title": "喷洒器 · 线圈态",
+            "title": "罐弹抛洒器（原喷洒器） · 线圈态",
             "kind": "成品模型",
             "sourceId": "mch_player_sprayer_coil",
             "slotId": "custom.mch_player_sprayer_coil",
@@ -8842,6 +8884,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:43",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8860,6 +8903,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:43",
                 "production/design/earth-reclamation/TERM-MIGRATION.md:179"
             ],
@@ -8981,6 +9025,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:47",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -8999,6 +9044,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:47",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -9035,6 +9081,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:48",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -9053,6 +9100,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:48",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -9089,6 +9137,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:49",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -9107,6 +9156,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:49",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -9143,6 +9193,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:50",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -9161,6 +9212,7 @@
             "faction": "玩家",
             "requirementStatus": "待制作",
             "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md",
                 "production/design/art-rules/05-提示词-机器与角色.md:50",
                 "TEngine/UnityProject/DesignDocs/ProjectA_GDD.md:207"
             ],
@@ -25116,6 +25168,74 @@
             "designSources": [
                 "TEngine/UnityProject/DesignDocs/fullgame/FG04_Home_Economy_Automation.md:31",
                 "production/design/art-rules/05-提示词-机器与角色.md:67"
+            ],
+            "dependencyIds": [],
+            "archived": false
+        },
+        {
+            "id": "mch_player_flyer",
+            "parentId": "chassis",
+            "title": "飞行",
+            "kind": "概念与需求",
+            "sourceId": "mch_player_flyer",
+            "slotId": "",
+            "notes": "",
+            "designId": "mch_player_flyer",
+            "faction": "玩家",
+            "requirementStatus": "待制作",
+            "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md"
+            ],
+            "dependencyIds": [],
+            "archived": false
+        },
+        {
+            "id": "mch_player_flyer_base",
+            "parentId": "mch_player_flyer",
+            "title": "飞行 · 基础模型",
+            "kind": "成品模型",
+            "sourceId": "mch_player_flyer_base",
+            "slotId": "custom.mch_player_flyer_base",
+            "notes": "",
+            "designId": "mch_player_flyer_base",
+            "faction": "玩家",
+            "requirementStatus": "待制作",
+            "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md"
+            ],
+            "dependencyIds": [],
+            "archived": false
+        },
+        {
+            "id": "mch_player_ship",
+            "parentId": "chassis",
+            "title": "船体",
+            "kind": "概念与需求",
+            "sourceId": "mch_player_ship",
+            "slotId": "",
+            "notes": "",
+            "designId": "mch_player_ship",
+            "faction": "玩家",
+            "requirementStatus": "待制作",
+            "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md"
+            ],
+            "dependencyIds": [],
+            "archived": false
+        },
+        {
+            "id": "mch_player_ship_base",
+            "parentId": "mch_player_ship",
+            "title": "船体 · 基础模型",
+            "kind": "成品模型",
+            "sourceId": "mch_player_ship_base",
+            "slotId": "custom.mch_player_ship_base",
+            "notes": "",
+            "designId": "mch_player_ship_base",
+            "faction": "玩家",
+            "requirementStatus": "待制作",
+            "designSources": [
+                "production/design/art-rules/20-Midjourney与Gemini出图口径.md"
             ],
             "dependencyIds": [],
             "archived": false

@@ -57,7 +57,7 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             var modelGo = AssetDatabase.LoadAssetAtPath<GameObject>(modelPath);
-            var mesh = FindFirstMesh(modelGo);
+            var mesh = FindPrimaryMesh(modelGo, modelPath, canonical);
             if (mesh == null)
             {
                 foreach (var a in AssetDatabase.LoadAllAssetsAtPath(modelPath))
@@ -90,6 +90,7 @@ namespace BinGames.EditorTools.FeatureArt
             {
                 go.AddComponent<MeshFilter>().sharedMesh = mesh;
                 go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+                CopySocketsToPrefabRoot(modelGo, go.transform);
                 prefab = PrefabUtility.SaveAsPrefabAsset(go, prefabPath);
             }
             finally
@@ -365,15 +366,87 @@ namespace BinGames.EditorTools.FeatureArt
             EditorUtility.SetDirty(mat);
         }
 
-        static Mesh FindFirstMesh(GameObject go)
+        static Mesh FindPrimaryMesh(GameObject go, string modelPath, string canonical)
         {
             if (go == null)
             {
                 return null;
             }
 
-            var mf = go.GetComponentInChildren<MeshFilter>(true);
-            return mf != null ? mf.sharedMesh : null;
+            var filters = go.GetComponentsInChildren<MeshFilter>(true);
+            Mesh primary = null;
+            var nonNullCount = 0;
+            foreach (var mf in filters)
+            {
+                if (mf == null || mf.sharedMesh == null)
+                {
+                    continue;
+                }
+
+                nonNullCount++;
+                if (primary == null)
+                {
+                    primary = mf.sharedMesh;
+                }
+
+                if (!string.IsNullOrEmpty(canonical) &&
+                    (string.Equals(mf.gameObject.name, canonical, StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(mf.sharedMesh.name, canonical, StringComparison.OrdinalIgnoreCase)))
+                {
+                    primary = mf.sharedMesh;
+                }
+            }
+
+            if (filters.Length > 1 || nonNullCount > 1)
+            {
+                Debug.LogWarning(
+                    $"[FeatureArtGamePrefabBaker] 母带 {modelPath} 含多个 MeshFilter（组件={filters.Length}，有效网格={nonNullCount}），" +
+                    $"将使用主 Mesh：{(primary != null ? primary.name : "null")}");
+            }
+
+            return primary;
+        }
+
+        static void CopySocketsToPrefabRoot(GameObject modelGo, Transform prefabRoot)
+        {
+            if (modelGo == null || prefabRoot == null)
+            {
+                return;
+            }
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var t in modelGo.GetComponentsInChildren<Transform>(true))
+            {
+                if (t == null || t == modelGo.transform ||
+                    !t.name.StartsWith("skt_", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!seen.Add(t.name))
+                {
+                    Debug.LogWarning($"[FeatureArtGamePrefabBaker] 发现重复挂点名称 {t.name}，已跳过重复项。");
+                    continue;
+                }
+
+                var pos = t.localPosition;
+                var rot = t.localRotation;
+                var scale = t.localScale;
+                var cur = t.parent;
+                while (cur != null && cur != modelGo.transform)
+                {
+                    pos = cur.localPosition + cur.localRotation * Vector3.Scale(cur.localScale, pos);
+                    rot = cur.localRotation * rot;
+                    scale = Vector3.Scale(cur.localScale, scale);
+                    cur = cur.parent;
+                }
+
+                var socket = new GameObject(t.name);
+                socket.transform.SetParent(prefabRoot, false);
+                socket.transform.localPosition = pos;
+                socket.transform.localRotation = rot;
+                socket.transform.localScale = scale;
+            }
         }
 
         static void EnsureAssetFolder(string assetFolder)

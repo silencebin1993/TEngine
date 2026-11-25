@@ -118,6 +118,7 @@ namespace BinGames.EditorTools.FeatureArt
                 }
 
                 FeatureArtCatalogIO.Save(data);
+                SyncWorkspaceRequirementStatus(matched.id, canonical);
                 LastBoundPrefab = prefab;
                 return new Result(packageDir, true,
                     wasOverwrite
@@ -335,6 +336,317 @@ namespace BinGames.EditorTools.FeatureArt
                     yield return dir;
                 }
             }
+        }
+
+        /// <summary>命令行批处理入口：解析 <c>-ingestPackages "dir1;dir2"</c>，逐包入库烘焙、打印校验摘要并更新
+        /// <c>FeatureArtWorkspace.json</c> 状态为"已绑定"。成功退出 0，失败打印 <c>[INGEST_FAIL]</c> 并退出 1。</summary>
+        public static void BatchIngestFromCommandLine()
+        {
+            var packagesArg = ReadCommandLineValue("-ingestPackages");
+            if (string.IsNullOrWhiteSpace(packagesArg))
+            {
+                Debug.LogError("[INGEST_FAIL] 缺少命令行参数 -ingestPackages。");
+                ExitBatch(1);
+                return;
+            }
+
+            var packages = packagesArg
+                .Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(p => p.Replace('\\', '/').Trim().TrimEnd('/'))
+                .Where(p => !string.IsNullOrEmpty(p))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (packages.Count == 0)
+            {
+                Debug.LogError("[INGEST_FAIL] -ingestPackages 未包含任何有效整包目录。");
+                ExitBatch(1);
+                return;
+            }
+
+            AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+
+            var failed = false;
+            foreach (var pkg in packages)
+            {
+                if (!TryIngestPackage(pkg, out var log))
+                {
+                    Debug.LogError($"[INGEST_FAIL] {pkg}：{log}");
+                    failed = true;
+                    continue;
+                }
+
+                if (!ValidateAndLogPackage(pkg, log, out var summary, out var err))
+                {
+                    Debug.LogError($"[INGEST_FAIL] {pkg}：{err}");
+                    failed = true;
+                    continue;
+                }
+
+                Debug.Log(summary);
+            }
+
+            if (failed)
+            {
+                Debug.LogError("[INGEST_FAIL] BatchIngestFromCommandLine 存在失败项。");
+                ExitBatch(1);
+                return;
+            }
+
+            Debug.Log($"[INGEST_OK] BatchIngestFromCommandLine 全部通过（{packages.Count} 包）。");
+            ExitBatch(0);
+        }
+
+        static string ReadCommandLineValue(string flag)
+        {
+            var args = Environment.GetCommandLineArgs();
+            for (var i = 0; i < args.Length - 1; i++)
+            {
+                if (string.Equals(args[i], flag, StringComparison.OrdinalIgnoreCase))
+                {
+                    return args[i + 1];
+                }
+            }
+
+            return null;
+        }
+
+        static void ExitBatch(int code)
+        {
+            if (Application.isBatchMode)
+            {
+                EditorApplication.Exit(code);
+            }
+        }
+
+        static bool ValidateAndLogPackage(string requestedPkgDir, string ingestLog, out string summary, out string error)
+        {
+            summary = null;
+            error = null;
+
+            var prefab = LastBoundPrefab;
+            if (prefab == null)
+            {
+                error = "TryIngestPackage 返回成功但 LastBoundPrefab 为空。";
+                return false;
+            }
+
+            var prefabPath = AssetDatabase.GetAssetPath(prefab);
+            var canonical = Path.GetFileNameWithoutExtension(prefabPath);
+            var pkgDir = (Path.GetDirectoryName(prefabPath) ?? requestedPkgDir).Replace('\\', '/').TrimEnd('/');
+
+            var mfs = prefab.GetComponentsInChildren<MeshFilter>(true);
+            var mrs = prefab.GetComponentsInChildren<MeshRenderer>(true);
+            if (mfs.Length != 1 || mrs.Length != 1 || mfs[0].gameObject != prefab || mrs[0].gameObject != prefab)
+            {
+                error = $"Prefab 根必须保留唯一 MeshFilter({mfs.Length}) + MeshRenderer({mrs.Length})。";
+                return false;
+            }
+
+            var mesh = mfs[0].sharedMesh;
+            var mat = mrs[0].sharedMaterial;
+            if (mesh == null || mat == null)
+            {
+                error = $"Prefab 缺少 sharedMesh({mesh != null}) 或 sharedMaterial({mat != null})。";
+                return false;
+            }
+
+            var bounds = mesh.bounds;
+            var tris = mesh.triangles.Length / 3;
+            var sockets = new List<string>();
+            foreach (var t in prefab.GetComponentsInChildren<Transform>(true))
+            {
+                if (t != prefab.transform && t.name.StartsWith("skt_", StringComparison.OrdinalIgnoreCase))
+                {
+                    sockets.Add($"{t.name}@{t.localPosition.ToString("F3")}");
+                }
+            }
+
+            var mainTex = mat.HasProperty("_MainTex") ? mat.GetTexture("_MainTex") : null;
+            var bumpTex = mat.HasProperty("_BumpMap") ? mat.GetTexture("_BumpMap") : null;
+            var emitTex = mat.HasProperty("_EmissionMap") ? mat.GetTexture("_EmissionMap") : null;
+            var emitKeyword = mat.IsKeywordEnabled("_EMISSION");
+
+            var bumpImporterType = "None";
+            if (bumpTex != null)
+            {
+                var bumpPath = AssetDatabase.GetAssetPath(bumpTex);
+                var ti = AssetImporter.GetAtPath(bumpPath) as TextureImporter;
+                bumpImporterType = ti != null ? ti.textureType.ToString() : "MissingImporter";
+            }
+
+            var hasDiskAlbedo = false;
+            var hasDiskNormal = false;
+            var hasDiskEmission = false;
+            var absDir = AbsFromAsset(pkgDir);
+            var prefix = (canonical + "_").ToLowerInvariant();
+            if (Directory.Exists(absDir))
+            {
+                foreach (var file in Directory.GetFiles(absDir, canonical + "_*.png"))
+                {
+                    var stem = (Path.GetFileNameWithoutExtension(file) ?? "").ToLowerInvariant();
+                    var suffix = stem.StartsWith(prefix, StringComparison.Ordinal)
+                        ? stem.Substring(canonical.Length)
+                        : stem;
+                    var asset = pkgDir + "/" + Path.GetFileName(file);
+                    if (suffix.Contains("_normal") || suffix.Contains("_nor"))
+                    {
+                        hasDiskNormal = true;
+                        var ti = AssetImporter.GetAtPath(asset) as TextureImporter;
+                        if (ti == null || ti.textureType != TextureImporterType.NormalMap)
+                        {
+                            error = $"法线贴图 {asset} 的 TextureImporterType={ti?.textureType.ToString() ?? "null"}（期望 NormalMap）。";
+                            return false;
+                        }
+                    }
+                    else if (suffix.Contains("_emission") || suffix.Contains("_emissive") || suffix.Contains("_emit"))
+                    {
+                        hasDiskEmission = true;
+                    }
+                    else if (!suffix.Contains("_metallic") && !suffix.Contains("_metalness") && !suffix.Contains("_roughness"))
+                    {
+                        hasDiskAlbedo = true;
+                    }
+                }
+            }
+
+            if (!mat.enableInstancing)
+            {
+                error = $"材质 {mat.name} 未开启 enableInstancing。";
+                return false;
+            }
+
+            if (hasDiskAlbedo && mainTex == null)
+            {
+                error = $"存在漫反射贴图但材质 _MainTex 为空。";
+                return false;
+            }
+
+            if (hasDiskNormal && (bumpTex == null || bumpImporterType != TextureImporterType.NormalMap.ToString()))
+            {
+                error = $"存在法线贴图但 _BumpMap={bumpTex != null} NormalImporter={bumpImporterType}。";
+                return false;
+            }
+
+            if (hasDiskEmission && (emitTex == null || !emitKeyword))
+            {
+                error = $"存在自发光贴图但 _EmissionMap={emitTex != null} _EMISSION={emitKeyword}。";
+                return false;
+            }
+
+            var catalog = FeatureArtCatalogIO.Load();
+            if (!TryFindSlotByFolderName(catalog, pkgDir, canonical, out var slot, out _))
+            {
+                error = $"保存后无法从 catalog 重新定位槽位：{pkgDir}";
+                return false;
+            }
+
+            if (!string.Equals(slot.location, canonical, StringComparison.Ordinal))
+            {
+                error = $"catalog 槽 {slot.id} location={slot.location}，期望 {canonical}。";
+                return false;
+            }
+
+            var wsStatus = "NoWorkspaceFile";
+            if (File.Exists(FeatureArtWorkspaceStore.AbsolutePath))
+            {
+                var ws = FeatureArtWorkspaceStore.Load();
+                var nodes = FindMatchingWorkspaceNodes(ws, slot.id, canonical);
+                if (nodes.Count == 0)
+                {
+                    wsStatus = "NoMatchedNode";
+                }
+                else
+                {
+                    foreach (var n in nodes)
+                    {
+                        if (!string.Equals(n.requirementStatus, "已绑定", StringComparison.Ordinal))
+                        {
+                            error = $"Workspace 节点 {n.id} 状态为 {n.requirementStatus}（期望 已绑定）。";
+                            return false;
+                        }
+                    }
+
+                    wsStatus = $"已绑定({nodes.Count})";
+                }
+            }
+
+            summary =
+                $"[INGEST_SUMMARY] pkg={pkgDir} canonical={canonical} slot={slot.id} location={slot.location} " +
+                $"tris={tris} sharedMesh.bounds.size=({bounds.size.x:F4}, {bounds.size.y:F4}, {bounds.size.z:F4}) " +
+                $"sharedMesh.bounds.min=({bounds.min.x:F4}, {bounds.min.y:F4}, {bounds.min.z:F4}) " +
+                $"skt_count={sockets.Count} sockets=[{string.Join(", ", sockets)}] " +
+                $"_MainTex={(mainTex != null ? mainTex.name : "null")} " +
+                $"_BumpMap={(bumpTex != null ? bumpTex.name : "null")} NormalImporter={bumpImporterType} " +
+                $"_EmissionMap={(emitTex != null ? emitTex.name : "null")} _EMISSION={emitKeyword} " +
+                $"instancing={mat.enableInstancing} workspace={wsStatus} | {ingestLog}";
+            return true;
+        }
+
+        static int SyncWorkspaceRequirementStatus(string slotId, string canonical)
+        {
+            if (!File.Exists(FeatureArtWorkspaceStore.AbsolutePath))
+            {
+                return 0;
+            }
+
+            var ws = FeatureArtWorkspaceStore.Load();
+            var matched = FindMatchingWorkspaceNodes(ws, slotId, canonical);
+            if (matched.Count == 0)
+            {
+                return 0;
+            }
+
+            var changed = false;
+            foreach (var node in matched)
+            {
+                if (!string.Equals(node.requirementStatus, "已绑定", StringComparison.Ordinal))
+                {
+                    node.requirementStatus = "已绑定";
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                ws.MarkContentChanged();
+                FeatureArtWorkspaceStore.Save();
+            }
+
+            var reloaded = FeatureArtWorkspaceStore.Load();
+            foreach (var node in FindMatchingWorkspaceNodes(reloaded, slotId, canonical))
+            {
+                if (!string.Equals(node.requirementStatus, "已绑定", StringComparison.Ordinal))
+                {
+                    throw new IOException($"Reload 检查失败：Workspace 节点 {node.id} requirementStatus={node.requirementStatus}。");
+                }
+            }
+
+            return matched.Count;
+        }
+
+        static List<FeatureArtNode> FindMatchingWorkspaceNodes(FeatureArtWorkspace ws, string slotId, string canonical)
+        {
+            var list = new List<FeatureArtNode>();
+            if (ws?.nodes == null)
+            {
+                return list;
+            }
+
+            foreach (var n in ws.nodes)
+            {
+                if (n == null)
+                {
+                    continue;
+                }
+
+                if ((!string.IsNullOrEmpty(slotId) && string.Equals(n.slotId, slotId, StringComparison.Ordinal)) ||
+                    (!string.IsNullOrEmpty(canonical) && string.Equals(n.id, canonical, StringComparison.Ordinal)))
+                {
+                    list.Add(n);
+                }
+            }
+
+            return list;
         }
 
         static string AbsFromAsset(string assetPath)

@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Tasks;
+using BinGames.EditorTools.CellArt;
 using GameLogic.ArtBinding;
 using UnityEditor;
 using UnityEngine;
@@ -268,6 +269,7 @@ namespace BinGames.EditorTools.FeatureArt
             if (File.Exists(abs) && !EditorUtility.DisplayDialog("覆盖母带模型", assetPath + " 已存在，用素材中心的 v" + model.ver.ToString("000") + " 覆盖？", "覆盖", "取消")) return;
             Directory.CreateDirectory(Path.GetDirectoryName(abs));
             File.Copy(Root + "/" + model.file, abs, true);
+            CopyAdoptedSidecars(node.id, model, Root + "/" + model.file, Path.GetDirectoryName(abs), canonical);
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
             AssetDatabase.Refresh();
             Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(pkg);
@@ -276,6 +278,163 @@ namespace BinGames.EditorTools.FeatureArt
             foreach (var r in results) sb.AppendLine((r.Ok ? "OK  " : "FAIL ") + r.Message);
             EditorUtility.DisplayDialog("导入采用模型并绑定", sb.ToString(), "好");
             if (FeatureArtPackageIngest.LastBoundPrefab != null) Selection.activeObject = FeatureArtPackageIngest.LastBoundPrefab;
+        }
+
+        static void CopyAdoptedSidecars(string nodeId, HubModel model, string srcModelAbs, string destDirAbs, string canonical)
+        {
+            if (string.IsNullOrEmpty(destDirAbs) || string.IsNullOrEmpty(canonical))
+            {
+                return;
+            }
+
+            Directory.CreateDirectory(destDirAbs);
+            var prefix = canonical + "_";
+            var copied = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            void CopyOne(string srcPath, string destName = null)
+            {
+                if (string.IsNullOrEmpty(srcPath) || !File.Exists(srcPath))
+                {
+                    return;
+                }
+
+                var fileName = string.IsNullOrEmpty(destName) ? Path.GetFileName(srcPath) : destName;
+                if (string.IsNullOrEmpty(fileName))
+                {
+                    return;
+                }
+
+                if (!fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    fileName = prefix + fileName;
+                }
+
+                if (!copied.Add(fileName))
+                {
+                    return;
+                }
+
+                var dstPath = Path.Combine(destDirAbs, fileName);
+                if (!string.Equals(Path.GetFullPath(srcPath), Path.GetFullPath(dstPath), StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Copy(srcPath, dstPath, true);
+                }
+            }
+
+            var srcDir = Path.GetDirectoryName(srcModelAbs);
+            if (!string.IsNullOrEmpty(srcDir) && Directory.Exists(srcDir))
+            {
+                foreach (var png in Directory.GetFiles(srcDir, prefix + "*.png"))
+                {
+                    CopyOne(png);
+                }
+
+                CopyOne(Path.Combine(srcDir, prefix + "rig.json"));
+            }
+
+            var rootFull = Path.GetFullPath(Root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+            foreach (var rel in CollectManifestSidecarPaths(nodeId, model))
+            {
+                var candidate = Path.GetFullPath(Path.Combine(Root, rel));
+                if (!candidate.StartsWith(rootFull, StringComparison.OrdinalIgnoreCase) || !File.Exists(candidate))
+                {
+                    continue;
+                }
+
+                var name = Path.GetFileName(candidate);
+                if (name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ||
+                    name.EndsWith("_rig.json", StringComparison.OrdinalIgnoreCase))
+                {
+                    CopyOne(candidate, name);
+                }
+            }
+        }
+
+        static IEnumerable<string> CollectManifestSidecarPaths(string nodeId, HubModel model)
+        {
+            var results = new List<string>();
+            if (string.IsNullOrEmpty(nodeId))
+            {
+                return results;
+            }
+
+            var manifestPath = Root + "/assets/" + nodeId + "/manifest.json";
+            if (!File.Exists(manifestPath))
+            {
+                return results;
+            }
+
+            try
+            {
+                var doc = CellArtJson.AsDict(CellArtJson.Deserialize(File.ReadAllText(manifestPath, Encoding.UTF8)));
+                var models = CellArtJson.AsList(doc != null && doc.TryGetValue("models", out var mv) ? mv : null);
+                if (models == null)
+                {
+                    return results;
+                }
+
+                Dictionary<string, object> target = null;
+                foreach (var item in models)
+                {
+                    var d = CellArtJson.AsDict(item);
+                    if (d == null)
+                    {
+                        continue;
+                    }
+
+                    var id = CellArtJson.Str(d.TryGetValue("id", out var iv) ? iv : null);
+                    var file = CellArtJson.Str(d.TryGetValue("file", out var fv) ? fv : null);
+                    if ((model != null && !string.IsNullOrEmpty(model.id) && string.Equals(id, model.id, StringComparison.Ordinal)) ||
+                        (model != null && !string.IsNullOrEmpty(model.file) && string.Equals(file, model.file, StringComparison.Ordinal)))
+                    {
+                        target = d;
+                        break;
+                    }
+
+                    if (target == null && CellArtJson.Bool(d.TryGetValue("adopted", out var av) ? av : null))
+                    {
+                        target = d;
+                    }
+                }
+
+                if (target != null && target.TryGetValue("sidecars", out var sv) && sv != null)
+                {
+                    var list = CellArtJson.AsList(sv);
+                    if (list != null)
+                    {
+                        foreach (var s in list)
+                        {
+                            var rel = CellArtJson.Str(s);
+                            if (!string.IsNullOrEmpty(rel))
+                            {
+                                results.Add(rel);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var dict = CellArtJson.AsDict(sv);
+                        if (dict != null)
+                        {
+                            foreach (var kv in dict)
+                            {
+                                var rel = CellArtJson.Str(kv.Value);
+                                if (!string.IsNullOrEmpty(rel))
+                                {
+                                    results.Add(rel);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[FeatureArtHub] 读取 sidecars 失败（{manifestPath}）：{e.Message}");
+            }
+
+            return results;
         }
     }
 }

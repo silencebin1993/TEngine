@@ -1013,13 +1013,14 @@ namespace BinGames.EditorTools.FeatureArt
                 return;
             }
 
+            var prefix = name + "_";
             foreach (var path in Directory.GetFiles(dir, name + "_*"))
             {
-                ImportOneMap(folder + "/" + Path.GetFileName(path));
+                ImportOneMap(folder + "/" + Path.GetFileName(path), prefix);
             }
         }
 
-        static void ImportOneMap(string assetPath)
+        static void ImportOneMap(string assetPath, string canonicalPrefix = null)
         {
             if (string.IsNullOrEmpty(assetPath) ||
                 !assetPath.StartsWith(RawPrefix, StringComparison.OrdinalIgnoreCase))
@@ -1043,12 +1044,22 @@ namespace BinGames.EditorTools.FeatureArt
             }
 
             var file = (Path.GetFileName(assetPath) ?? "").ToLowerInvariant();
+            var check = !string.IsNullOrEmpty(canonicalPrefix) &&
+                        file.StartsWith(canonicalPrefix.ToLowerInvariant(), StringComparison.Ordinal)
+                ? file.Substring(canonicalPrefix.Length - 1)
+                : file;
             var changed = false;
-            if (file.Contains("_normal") || file.Contains("_nor."))
+            if (check.Contains("_normal") || check.Contains("_nor"))
             {
                 if (tex.textureType != TextureImporterType.NormalMap)
                 {
                     tex.textureType = TextureImporterType.NormalMap;
+                    changed = true;
+                }
+
+                if (tex.convertToNormalmap)
+                {
+                    tex.convertToNormalmap = false;
                     changed = true;
                 }
             }
@@ -1319,7 +1330,9 @@ namespace BinGames.EditorTools.FeatureArt
             ImportMapAssets(folder, name);
             var albedo = FindMap(folder, name, isAlbedo: true, "texture_pbr", "albedo", "diffuse", "basecolor", "base_color", "texture");
             var normal = FindMap(folder, name, isAlbedo: false, "normal", "nor");
+            var emission = FindMap(folder, name, isAlbedo: false, "emission", "emissive", "emit");
             PaintStandard(mat, albedo, normal, metallic: null);
+            ApplyPackageEmission(mat, emission);
             if (mat.HasProperty("_MetallicGlossMap"))
             {
                 mat.SetTexture("_MetallicGlossMap", null);
@@ -1343,6 +1356,40 @@ namespace BinGames.EditorTools.FeatureArt
             }
         }
 
+        static void ApplyPackageEmission(Material mat, Texture emission)
+        {
+            if (emission != null)
+            {
+                if (mat.HasProperty("_EmissionMap"))
+                {
+                    mat.SetTexture("_EmissionMap", emission);
+                }
+
+                if (mat.HasProperty("_EmissionColor"))
+                {
+                    mat.SetColor("_EmissionColor", Color.white);
+                }
+
+                mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.BakedEmissive;
+                mat.EnableKeyword("_EMISSION");
+            }
+            else
+            {
+                if (mat.HasProperty("_EmissionMap"))
+                {
+                    mat.SetTexture("_EmissionMap", null);
+                }
+
+                if (mat.HasProperty("_EmissionColor"))
+                {
+                    mat.SetColor("_EmissionColor", Color.black);
+                }
+
+                mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.EmissiveIsBlack;
+                mat.DisableKeyword("_EMISSION");
+            }
+        }
+
         static Texture2D FindMap(string folder, string name, bool isAlbedo, params string[] hints)
         {
             Texture2D fallback = null;
@@ -1352,10 +1399,14 @@ namespace BinGames.EditorTools.FeatureArt
                 return null;
             }
 
+            var prefix = (name + "_").ToLowerInvariant();
             foreach (var path in Directory.GetFiles(dir, name + "_*.png"))
             {
                 var file = Path.GetFileNameWithoutExtension(path) ?? "";
                 var lower = file.ToLowerInvariant();
+                var suffix = lower.StartsWith(prefix, StringComparison.Ordinal)
+                    ? lower.Substring(name.Length)
+                    : lower;
                 var asset = folder + "/" + Path.GetFileName(path);
                 var tex = AssetDatabase.LoadAssetAtPath<Texture2D>(asset);
                 if (tex == null)
@@ -1365,15 +1416,17 @@ namespace BinGames.EditorTools.FeatureArt
 
                 if (isAlbedo)
                 {
-                    if (lower.Contains("_normal") || lower.Contains("_roughness") ||
-                        lower.Contains("_metallic") || lower.Contains("_metalness"))
+                    if (suffix.Contains("_normal") || suffix.Contains("_nor") ||
+                        suffix.Contains("_roughness") || suffix.Contains("_metallic") ||
+                        suffix.Contains("_metalness") || suffix.Contains("_emission") ||
+                        suffix.Contains("_emissive") || suffix.Contains("_emit"))
                     {
                         continue;
                     }
 
                     foreach (var h in hints)
                     {
-                        if (lower.Contains(h))
+                        if (suffix.Contains(h))
                         {
                             return tex;
                         }
@@ -1388,7 +1441,7 @@ namespace BinGames.EditorTools.FeatureArt
                 {
                     foreach (var h in hints)
                     {
-                        if (lower.Contains(h))
+                        if (suffix.Contains(h))
                         {
                             return tex;
                         }
