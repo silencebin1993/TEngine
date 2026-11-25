@@ -1586,7 +1586,7 @@ namespace GameLogic.Campaign.Regions
         public static bool InMeltdown(int machine)
         {
             Combat.CombatSite site = WorldSim.WorldSimulation.Home != null && WorldSim.WorldSimulation.Home.IsLoaded ? WorldSim.WorldSimulation.Home.Combat : null;
-            return site != null && site.TryGetMachineUnit(machine, out int unit) && site.Kernel.InPhase(unit, BinGames.Sim.Combat.EmgPhaseConst.Overheat);
+            return site != null && site.MachineInPhase(machine, BinGames.Sim.Combat.EmgPhaseConst.Overheat);
         }
 
         private static void ResumeFromFire(CampaignState state, WorkOrderRecord o)

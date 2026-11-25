@@ -71,6 +71,9 @@ namespace GameLogic.Campaign.Combat
             return !IsDisposed && Kernel.TryGetClarity(unitId, out clarity);
         }
 
+        /// <summary>FG15-BAL-01（FG-GAP-233）：这台机器此刻在某涌现相态里（如熔穿 EmgPhaseConst.Overheat）；FG15-PL-01 从 HomeValleyWorkOrders 收回桥接层（FG14 §5 硬约束 3）。</summary>
+        public bool MachineInPhase(int machine, int phase) => !IsDisposed && TryGetMachineUnit(machine, out int unit) && Kernel.InPhase(unit, phase);
+
         /// <summary>改单位的酸蚀抗性（0～1；防腐涂层等）。</summary>
         public bool SetAcidResist(int unitId, float resist) => !IsDisposed && Kernel.SetAcidResist(unitId, Mathf.Clamp01(resist));
 

@@ -1043,7 +1043,8 @@ namespace GameLogic.EditorTools.JourneyBots
             foreach (KeyValuePair<string, string> kv in flat.OrderBy(k => k.Key, StringComparer.Ordinal))
             {
                 if (kv.Key.StartsWith("Notifications", StringComparison.Ordinal) || kv.Key.StartsWith("SaveHistory", StringComparison.Ordinal)
-                    || kv.Key == "LastSaveReason")
+                    || kv.Key == "LastSaveReason"
+                    || kv.Key == "RealPlaySeconds") // FG15-SYS-01 存档卡“实际游玩时长”：按真实秒累计（CampaignSaveService 每帧 +realDt），与存档历史写盘时间同类，不是结算结果
                 {
                     continue;
                 }

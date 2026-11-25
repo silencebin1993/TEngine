@@ -121,8 +121,8 @@ namespace GameLogic.EditorTools.JourneyBots
                 S("rally", "右键抵达点靠核心一侧的地面：全队开到防线", 15, null, TickRally),
                 S("raid1_up", "命令栏机器列表点 H 车：接入（镜头直控），信号核里的过载生效", 30, c => FgjM1Journey.ClickMachineList(c, c.GetInt("m.h")), c => TickUplinked(c, "m.h"), retries: 3),
                 S("raid1_arrive", "突袭部队到达、展开攻城", 400, null, c => TickSieging(c, "r1")),
-                S("raid1_fight", "直控开到射程内左键点敌人开火：重炮 + 过载熔穿（P03）溅出熔融金属；敌人被击毁留下残骸；打完 / 到时撤退后熔融金属凝成冷渣", 600, null, TickRaidFight),
-                S("raid1_end", "突袭结束（撤走的敌人路过时还在开火，余波算在这一步）：防线前有残骸、有冷渣；记下编号", 60, c => { if (SignalPresence.CurrentMachineLogicId != 0) JourneyInput.PressAction(GameActionId.ToggleCameraView); }, TickRaidEnd),
+                S("raid1_fight", "直控开到射程内左键点敌人开火：重炮 + 过载熔穿（P03）溅出熔融金属；打出冷渣就退出接入，全队右键来犯者追击（撤退的也追着打掉）；敌人被击毁留下残骸；打完 / 到时撤退后熔融金属凝成冷渣", 600, null, TickRaidFight),
+                S("raid1_end", "突袭结束（撤走的敌人路过时还在开火，余波算在这一步）：等余波落定（没有来犯者、熔融金属凝固、没有正在烧的残骸、渣冷到燃点以下），防线前有残骸、有冷渣；记下编号", 60, c => { if (SignalPresence.CurrentMachineLogicId != 0) JourneyInput.PressAction(GameActionId.ToggleCameraView); }, TickRaidEnd),
 
                 S("raid2_fix", "进度夹具：再触发一波突袭（剧情入口），预警快进", 15, c => RequestRaid(c, "r2"), c => TickRaidRequested(c, "r2")),
                 JourneyCommon.PureWait(S("raid2_arrive", "下一波部队到达、展开攻城：结算基线里上次的残骸与冷渣仍在，同样的编号还在内核里（FGR-EMG-150）", 500, null, TickSecondRaid)),
@@ -134,7 +134,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 Seed = TestSeed,
                 TotalTimeoutSeconds = 1500,
                 OnFinish = Cleanup,
-                Version = 1,
+                Version = 1, // FG15-PL-01 修复轮 4：raid1_fight 加退出接入后的右键追击、raid1_end 等余波落定再记编号（dr_leave 及之前的断点不受影响；raid1_end 断点要完整跑重写）
                 CheckpointAfter = new[] { "emg_fix", "squad_fix", "burn", "shock", "shatter", "dr_leave", "raid1_end" },
                 Steps = steps,
             };
@@ -1003,13 +1003,39 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             if (!theater && raiders.Count == 0)
             {
-                return StepOutcome.Done($"突袭结束：直控开火 {c.GetInt("f.clicks")} 次，熔穿 {Count(site.Kernel, Melt)} 次，残骸 {site.Kernel.WreckCount}");
+                return StepOutcome.Done($"突袭结束：直控开火 {c.GetInt("f.clicks")} 次，熔穿 {Count(site.Kernel, Melt)} 次，退出接入后全队右键追击 {c.GetInt("r1.chase")} 次，残骸 {site.Kernel.WreckCount}");
             }
             // 熔穿打出第一堆冷渣就退出接入：剩下的交给 AI 队友常规开火——熔融金属会把落在里面的残骸烧掉（FGR-EMG-113），最后几台要在没有热斑块的地方留下残骸。
             if (up && NewSlag(c, site.Kernel).Count > 0)
             {
                 JourneyInput.ReleaseKeys();
                 JourneyInput.PressAction(GameActionId.ToggleCameraView);
+                return StepOutcome.Wait;
+            }
+            if (!up && raiders.Count > 0)
+            {
+                // FG15-PL-01 修复轮 4（旧旅程整套回归：快进 FAIL 生成 3 / 被打掉 3，不快进 PASS 剩 #3 耐久 7/55——临界）：残骸是掩体（CombatLogic.EmgWreckHit），
+                // 损失过重撤走的来犯者边走边朝防线开火，子弹打在防线前的残骸上；只要还有来犯者在场，残骸就在挨打。正式打法：全队（team 步选中，接入 H 车不改选择集）
+                // 右键离全队最近的来犯者（RTS 右键敌人 = 攻击），目标换了或每 3 秒再右键一次，把撤退的也追着打掉——最后几台倒在追击路上、身边没有热斑块，残骸留得下来。
+                IReadOnlyList<int> sel = GameRoot.HomeValley?.SquadCommands?.Selection;
+                List<int> squad = Team.Select(k => c.GetInt(k)).Where(id => sel != null && sel.Contains(id) && MachineRegistry.TryGetRecord(id, out MachineRecord r) && r.IsAlive).ToList();
+                if (squad.Count > 0 && !JourneyInput.Holding)
+                {
+                    Vector2 center = squad.Aggregate(Vector2.zero, (a, x) => a + FgjM8Journey.PosOf(x)) / squad.Count;
+                    (int Id, Vector2 Pos) t = raiders.OrderBy(r => (r.Pos - center).sqrMagnitude).First();
+                    string kt = FgjM3Common.SK(c, "tgt"), ka = FgjM3Common.SK(c, "rcAt");
+                    if ((c.GetInt(kt) != t.Id || NowMs() - c.GetLong(ka) > 3000) && FgjM3Common.TryClick(t.Pos, 1))
+                    {
+                        c.SetInt(kt, t.Id);
+                        c.SetLong(ka, NowMs());
+                        c.SetInt("r1.chase", c.GetInt("r1.chase") + 1);
+                    }
+                }
+                else if (squad.Count == 0 && c.GetInt(FgjM3Common.SK(c, "nosel")) == 0)
+                {
+                    c.SetInt(FgjM3Common.SK(c, "nosel"), 1);
+                    c.Log($"    追击：选择集里没有存活的队伍机器（[{string.Join("、", (sel ?? Array.Empty<int>()).Select(FgjM1Journey.Label))}]），右键来犯者没人接");
+                }
                 return StepOutcome.Wait;
             }
             if (!up || raiders.Count == 0 || !FgjEmg1Journey.Program(site, h, out CombatWeapon w, out _))
@@ -1125,6 +1151,19 @@ namespace GameLogic.EditorTools.JourneyBots
             if (r == null || r.EndTick < 0)
             {
                 return StepOutcome.Fail("这波突袭没有结算");
+            }
+            // FG15-PL-01 修复轮 4（快进完整跑 raid2_arrive 失败：记下的 4 块残骸里 3 块当时温度 180 正在烧、冷渣 643 度还是热渣，下一波来时只剩 1 / 4、0 / 1）：
+            // “余波算在这一步”——等余波落定再记编号：场上没有来犯者、熔融金属都凝固了、没有正在烧的残骸（CombatKernel.WreckBurning，烧起来只会烧到没）、
+            // 这波的渣都冷到燃点以下（燃点以上的热渣还会点燃贴着的残骸，CombatLogic.EmgWreckContact；燃点 emg.wreck.ignite_temp = 180 = EmgConst.DefaultWreckIgniteTemp）。
+            // 落定后再按上面同一条判定核“有残骸、有冷渣”；记下的就是会留到下一波的。
+            bool molten = Enumerable.Range(0, k.PatchSlots).Any(i => k.TryGetPatch(i, out CombatZone z) && z.Matter == EmgMatterConst.Molten);
+            int burning = Enumerable.Range(0, k.WreckCount).Count(i => k.TryGetWreck(i, out EmgWreck w) && k.WreckBurning(w));
+            int hotSlag = Enumerable.Range(0, k.PatchSlots).Count(i => k.TryGetPatch(i, out CombatZone z) && z.Matter == EmgMatterConst.Slag && slag.Contains(z.EmgId) && z.Temp >= EmgConst.DefaultWreckIgniteTemp);
+            int raidersLeft = D.Raiders().Count;
+            if (raidersLeft > 0 || molten || burning > 0 || hotSlag > 0)
+            {
+                return c.StepElapsed < 50 ? StepOutcome.Wait
+                    : StepOutcome.Fail($"余波 50 秒还没落定：来犯者 {raidersLeft}、熔融金属 {(molten ? "还有" : "没有")}、正在烧的残骸 {burning}、热渣 {hotSlag}；{WreckLine(k)}");
             }
             c.Log(TeamHp(c) + "；" + WreckLine(k));
             c.Set("left.slag", string.Join(",", slag));

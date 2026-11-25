@@ -212,6 +212,8 @@ namespace GameLogic.EditorTools
                     c.Faction, c.FixedOnly.ToString(CultureInfo.InvariantCulture),
                     // EMG4-LOOT-01 修复轮 1：标志组件内核专属行为参数来源（敌人行）
                     c.BehaviorOf,
+                    // FG15-BAL-01：独特组件由哪件遗产解锁
+                    c.UnlockedBy,
                 };
                 Compare(f, mine, cdiff);
             }

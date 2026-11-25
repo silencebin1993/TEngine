@@ -142,10 +142,15 @@ namespace GameLogic.EditorTools.JourneyBots
             S("w2_unpanel", "Esc 关掉炮塔面板与通用面板，按建造键关掉建造模式（左键交给炮塔开火）", 20, null, TickUplinkCleared, retries: 1),
             S("w2_fire", "第二波到达：左键点进攻的敌人，接入的炮塔亲自瞄准开火（左键 = 亲自开火）；直到这一波被打退", 500, null, TickManualFire),
             S("w2_leave", "按接入键离开炮塔：信号回到归还核心", 10, c => JourneyInput.PressAction(GameActionId.ToggleCameraView), TickTurretLeft, retries: 1),
-            S("w3_plan", "留在家园等第三波排定（按 3 倍速键；暴露回到 30 以上，导演按最短间隔排在第二波之后至少 1 个游戏日）", 900,
-                c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)), TickThirdPlanned),
-            // 修复轮续：第三波排定后不再关广播（上一版的 exp_off3 去掉）——补好火墙之后家园照常高耗电，暴露继续涨，第三波在预警前并成 2 级；
-            // 1 级的第三波在两道火墙下一座建筑都拆不掉（续跑实测：全部击毁、损失 0、爆燃 61 次），“被摧毁的建筑已经自动重建”就无从证明。
+            // FG15-PL-01 修复轮 3（FG15-BAL-01 BAL-REC-020 / FG-GAP-151 之后，旅程跟着系统改）：高功率暴露只按生产用电换算，研究做完、两座实验室拆掉以后
+            // 家园生产用电在阈值 100 上下（整套回归实测 115 → 每游戏小时 +0.45，第二波毁掉发电机后归零），暴露涨不回 30；导演排的下一波是骚扰
+            // （第二波抵达后安静满 raid.harass_quiet_days = 2 个游戏日才排，3 倍速约 800 真实秒），所以按 3 倍速与等待拆成两步，等待标纯等待，超时按 2 个游戏日留余量。
+            S("w3_speed", "留在家园等第三波：按 3 倍速键", 10, c => FgjM1Journey.PressIf(GameActionId.SpeedTriple, !Mathf.Approximately(GameClock.Speed, 3f)),
+                c => Mathf.Approximately(GameClock.Speed, 3f) ? StepOutcome.Done("3 倍速") : c.StepElapsed < 0.5 ? StepOutcome.Wait : StepOutcome.Retry($"倍速 {GameClock.Speed}x"), retries: 1),
+            JourneyCommon.PureWait(S("w3_plan", "等导演排定第三波：暴露越过 30 就是普通 1 级（与第二波抵达相隔至少最短间隔 1 个游戏日）；暴露没涨上去（只算生产用电）就是骚扰（第二波抵达后安静满 2 个游戏日）", 1500,
+                null, TickThirdPlanned)),
+            // 修复轮续：第三波排定后不再关广播（上一版的 exp_off3 去掉）。当时总用电（含炮塔 / 护盾）计暴露，第三波在预警前会并成 2 级；FG15-BAL-01 起只算生产用电，
+            // 第三波通常是 0 级骚扰。“被摧毁的建筑已经自动重建”靠两波里任一波的损失（TickRebuilt 两波都没损失就判失败，不赌第三波）。
             S("w2_back", "按跳回上一台机器键（默认 J）：跨地点远距离跳转回远征队", 30, c => JourneyInput.PressAction(GameActionId.JumpPreviousMachine), TickJumpedBack, retries: 2),
 
             // ── 第三波：留在远征队，家园自己守 ──
@@ -361,8 +366,54 @@ namespace GameLogic.EditorTools.JourneyBots
             return $"物质烧设施：烧蚀结算 {GameLogic.Campaign.Logistics.PipeLeakService.AreaBurns} 次、受击 {GameLogic.Campaign.Logistics.PipeLeakService.FireHits} 格、炮塔留给内核 {GameLogic.Campaign.Logistics.PipeLeakService.TurretsLeftToKernel}；明火斑块 {fire}、熔融 {molten}；耐久不满 [{string.Join("，", hurt)}]";
         }
 
+        /// <summary>
+        /// FG15-PL-01 修复轮 4：规则日志只留最近 100 条（StandingRuleService.LogMax）。FG15-QA-01 起突袭中被斑块烧毁的建筑也记进结算损失（M10-BASELINE 第 868 行），
+        /// 火灭后 R2 逐格重建传送带一次写几十条，会把早先“重建 / 等料”那几条挤出日志；旅程按日志序号边走边记下 R2 对每个对象的最新一条（玩家在规则面板上同样是边看边追溯），
+        /// 末步 rebuilt 按“看到过的最新一条”判可追溯。LogFirewall 在第二波起每个等待步骤每帧都调；漏看（两次之间被挤掉的超过 100 条）会记一行，不静默。
+        /// </summary>
+        private static void NoteR2Trace(JourneyContext c)
+        {
+            int rule = c.GetInt("rule");
+            IReadOnlyList<RuleLogRecord> log = StandingRuleService.LogEntries(St);
+            int last = c.GetInt("r2.serial");
+            if (rule == 0 || log.Count == 0 || log[log.Count - 1] == null || log[log.Count - 1].Serial <= last)
+            {
+                return;
+            }
+            if (last > 0 && log[0] != null && log[0].Serial > last + 1)
+            {
+                c.Log($"    规则日志漏看 {log[0].Serial - last - 1} 条（序号 {last + 1}～{log[0].Serial - 1} 在两次查看之间被挤出最近 100 条）");
+            }
+            Dictionary<string, string> seen = R2Seen(c);
+            foreach (RuleLogRecord e in log)
+            {
+                if (e != null && e.Serial > last && e.Rule == rule && !string.IsNullOrEmpty(e.EntityId))
+                {
+                    seen[e.EntityId] = e.Key;
+                }
+            }
+            c.SetInt("r2.serial", log[log.Count - 1].Serial);
+            c.Set("r2.seen", string.Join("|", seen.Select(kv => kv.Key + "=" + kv.Value)));
+        }
+
+        /// <summary>R2 记过的对象 → 最新一条日志键（实体键形如 b:home_valley:barrier_t2#80）。</summary>
+        private static Dictionary<string, string> R2Seen(JourneyContext c)
+        {
+            var seen = new Dictionary<string, string>(StringComparer.Ordinal);
+            foreach (string kv in c.Get("r2.seen", string.Empty).Split(new[] { '|' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                int eq = kv.LastIndexOf('=');
+                if (eq > 0)
+                {
+                    seen[kv.Substring(0, eq)] = kv.Substring(eq + 1);
+                }
+            }
+            return seen;
+        }
+
         private static void LogFirewall(JourneyContext c, string tag, int every = 30)
         {
+            NoteR2Trace(c);
             string trapId = c.Get("trap.id");
             if (string.IsNullOrEmpty(trapId))
             {
@@ -795,21 +846,26 @@ namespace GameLogic.EditorTools.JourneyBots
                 : StepOutcome.Fail($"第二波不对：{D.PlanLine(p2)}；与第一波（排定抵达 {h1?.ArrivalTick}）相隔 {gap} 步");
         }
 
-        /// <summary>第三波：第二波之外的、由暴露触发的普通突袭排定了（1 级；与第二波抵达相隔至少最短间隔）。</summary>
+        /// <summary>
+        /// 第三波：第二波之后导演排定的下一波家园突袭，按导演规则逐项核（FG15-BAL-01 之后两种都可能先来）：
+        /// 暴露触发 = 1 级、与第二波抵达相隔 ≥ 最短间隔；骚扰 = 0 级、排定时刻离第二波抵达 ≥ raid.harass_quiet_days 且排定时暴露没过 30（还没排普通突袭）。
+        /// </summary>
         private static StepOutcome TickThirdPlanned(JourneyContext c)
         {
             LogFirewall(c, "等第三波排定", 60);
             JourneyCommon.ResumeIfAutoPaused(c);
             CampaignState s = St;
             string p2id = c.Get("plan2");
-            RaidPlanRecord p3 = D.LivePlans(s).FirstOrDefault(p => p.PlanId != p2id && !p.FirstRaid && p.Trigger == RaidCatalog.TriggerExposure && p.State >= RaidDirectorService.StateScheduled);
+            RaidPlanRecord p3 = D.LivePlans(s).FirstOrDefault(p => p.PlanId != p2id && !p.FirstRaid && p.State >= RaidDirectorService.StateScheduled
+                                                                   && (p.Trigger == RaidCatalog.TriggerExposure || p.Trigger == RaidCatalog.TriggerHarass));
+            float prod = CampaignExposureLedger.ProductionPowerDemand(s);
             if (p3 == null)
             {
                 int tick = (int)(c.StepElapsed / 30);
                 if (tick > c.GetInt(FgjM3Common.SK(c, "log")))
                 {
                     c.SetInt(FgjM3Common.SK(c, "log"), tick);
-                    c.Log($"等第三波：暴露 {s.SignalExposure:F1}（广播{(s.SignalTowerBroadcastOff ? "已关闭" : "开着")}、{GameClock.Speed}x）；计划 [{string.Join("；", D.LivePlans(s).Select(D.PlanLine))}]");
+                    c.Log($"等第三波：暴露 {s.SignalExposure:F1}（广播{(s.SignalTowerBroadcastOff ? "已关闭" : "开着")}、生产用电 {prod:F0} / 总用电 {s.PowerDemand:F0}、{GameClock.Speed}x）；计划 [{string.Join("；", D.LivePlans(s).Select(D.PlanLine))}]");
                 }
                 return StepOutcome.Wait;
             }
@@ -818,6 +874,13 @@ namespace GameLogic.EditorTools.JourneyBots
             long arrive2 = h2?.ArrivalTick ?? live2?.ArrivalTick ?? -1;
             long gap = arrive2 >= 0 ? p3.ArrivalTick - arrive2 : -1;
             c.Set("plan3", p3.PlanId);
+            if (p3.Trigger == RaidCatalog.TriggerHarass)
+            {
+                long quiet = arrive2 >= 0 ? p3.CreatedTick - arrive2 : -1;
+                return quiet >= RaidDirectorService.DayTicks(RaidCatalog.HarassQuietDays) - 2 && p3.Level == 0 && s.SignalExposure < 30f
+                    ? StepOutcome.Done($"暴露 {s.SignalExposure:F1} 没回到 30（只算生产用电 {prod:F0}，防御用电不计）：导演在第二波抵达后安静 {RaidDirectorService.Duration(quiet)} 时排定骚扰作第三波 {D.PlanLine(p3)}（安静至少 {RaidCatalog.HarassQuietDays:0.#} 个游戏日）")
+                    : StepOutcome.Fail($"第三波（骚扰）不对：{D.PlanLine(p3)}；排定时离第二波抵达（{arrive2}）{quiet} 步；暴露 {s.SignalExposure:F1}");
+            }
             return gap >= RaidDirectorService.DayTicks(RaidCatalog.MinIntervalDays) - 2 && p3.Level == 1
                 ? StepOutcome.Done($"暴露 {s.SignalExposure:F1} 越过 30：排定第三波 {D.PlanLine(p3)}；与第二波抵达相隔 {RaidDirectorService.Duration(gap)}（最短间隔 1 个游戏日）")
                 : StepOutcome.Fail($"第三波不对：{D.PlanLine(p3)}；与第二波（抵达 {arrive2}）相隔 {gap} 步");
@@ -1329,12 +1392,13 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             var waiting = new List<string>();
             var done = new List<string>();
-            IReadOnlyList<RuleLogRecord> log = StandingRuleService.LogEntries(s);
+            NoteR2Trace(c);
+            Dictionary<string, string> seen = R2Seen(c); // 实体键 b:<建筑 ID> → R2 最新一条日志键（日志只留 100 条，见 NoteR2Trace）
             foreach ((string Id, string Name) x in targets)
             {
                 BuildingRecord b = HomeGridService.FindBuilding(s, x.Id);
                 bool up = b != null && !HomeValleyController.IsPlannedGhost(b) && b.ConstructionState == BuildingConstructionState.Operational;
-                bool traced = log.Any(e => e != null && e.Rule == rule && (e.EntityId ?? string.Empty).Contains(x.Id));
+                bool traced = seen.ContainsKey("b:" + x.Id);
                 if (up && traced)
                 {
                     done.Add($"{x.Name}（{x.Id}）");
@@ -1367,9 +1431,9 @@ namespace GameLogic.EditorTools.JourneyBots
                     {
                         continue;
                     }
-                    RuleLogRecord last = log.LastOrDefault(e => e != null && e.Rule == rule && (e.EntityId ?? string.Empty).Contains(x.Id));
+                    seen.TryGetValue("b:" + x.Id, out string lastKey);
                     int cost = BuildingOps.RebuildScrapFor(b);
-                    if (last != null && last.Key == "rules.log.rebuild_wait" && s.Scrap < cost && HomeValleyWorkOrders.FindActiveRepair(s, b.BuildingId) == null)
+                    if (lastKey == "rules.log.rebuild_wait" && s.Scrap < cost && HomeValleyWorkOrders.FindActiveRepair(s, b.BuildingId) == null)
                     {
                         starved.Add($"{x.Name}（{x.Id}）：R{rule} 等料（重建要 {cost}，仓库里有 {s.Scrap}）");
                     }

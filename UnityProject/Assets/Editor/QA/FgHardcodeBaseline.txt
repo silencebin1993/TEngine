@@ -416,11 +416,13 @@ Campaign/WorldGen/TerritoryAnchorChecks.cs|StateMoved|2
 Campaign/WorldGen/TerritoryAnchorChecks.cs|StateOk|1
 Campaign/WorldGen/TerritoryAnchorChecks.cs|StatePending|0
 Campaign/WorldGen/TerritoryPlanner.cs|CausewayPollutionCap|2
+Campaign/WorldGen/TerritoryPlanner.cs|EscapeMargin|48|技术常量：v5 连通性判定的生成输入（FG15-QA-03，FGR-GEN-061 改它须新增生成器版本，不入调参表）
+Campaign/WorldGen/TerritoryPlanner.cs|ReachRegenFromVersion|5|技术常量：生成器版本号门槛（FG15-QA-03）
 Campaign/WorldGen/WorldDiffCodec.cs|EntryBytes|5
 Campaign/WorldGen/WorldDiffCodec.cs|PollutionBit|2
 Campaign/WorldGen/WorldDiffCodec.cs|TerrainBit|1
 Campaign/WorldGen/WorldFeatures.cs|Slots|6
-Campaign/WorldGen/WorldGenContent.cs|Current|4
+Campaign/WorldGen/WorldGenContent.cs|Current|5|技术常量：生成器版本号（FG15-QA-03 v5）
 Campaign/WorldGen/WorldGenContent.cs|LegacyPrototype|0
 Campaign/WorldGen/WorldMapMarkers.cs|NoteMaxLength|80
 Campaign/WorldSim/TerritoryControlService.cs|KeyBase|200000

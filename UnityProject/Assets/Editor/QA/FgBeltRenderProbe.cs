@@ -187,7 +187,7 @@ namespace GameLogic.EditorTools
         {
             int px = Mathf.Clamp(Mathf.RoundToInt((x - (CamPos.x - Ortho)) / (2f * Ortho) * Size), 0, Size - 1);
             int py = Mathf.Clamp(Mathf.RoundToInt((z - (CamPos.z - Ortho)) / (2f * Ortho) * Size), 0, Size - 1);
-            return t.GetPixel(px, py);
+            return GpuProbeColor.ToGammaEquivalent(t.GetPixel(px, py));
         }
 
         /// <summary>第 <paramref name="cx"/> 格里、z = <paramref name="z"/> 这一行上最亮点的 x（世界坐标，格内 0.52～1.48 扫描）。</summary>

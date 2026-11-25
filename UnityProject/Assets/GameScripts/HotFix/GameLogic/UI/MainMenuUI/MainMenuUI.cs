@@ -1233,6 +1233,7 @@ namespace GameLogic
             if (t != null)
             {
                 t.text = string.Empty; // 文字由刷新按文本键写（不进静态文字表）
+                t.name = name.Replace("m_btn_", "m_text_") + "Label"; // 克隆的标签不与模板按钮的标签同名（按名查找会拿错按钮的字）
             }
             return button;
         }

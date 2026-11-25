@@ -44,10 +44,15 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 S("boss_fix", "首领夹具（DEBT-FG11E2E01-03）：中继链从链尾接着往数据中心入口推（每座过正式放置校验，推到 3 级污染的辐射带为止），链尾覆盖里建一座有电的 T2 信号塔覆盖到入口（FG-GAP-239）；远征队每台耐久 1500、回厂改造到第 2 版（只留重炮、不带燃迹——带燃迹持续开火会自燃锁火，FGJ-M10 同一正式打法）；" +
                               "信号核 2 号槽再装一枚过载（余烬主机封锁的是装着固件的槽）", 20, ApplyBossFixture, TickBossFixture),
+                // FG15-PL-01 修复轮 4（旅程跟着系统改，M10-BASELINE 差异表）：FG15-UX-01 起选中机器后右键室内入口 = 走过去、到了就进（DEBT-FG8GEN02-10 RTS 右键情境命令）；
+                // 旧打法“右键入口点（移动）→ 左键开面板 → 点进入”在第一步就被当成进入命令、远征队直接进了数据中心。改为先左键看入口面板（首领名与三阶段）、关掉，再选队右键入口。
+                // 面板“进入”按钮由冒烟 PlaySmokeTest 覆盖（EntranceGo）。
+                S("gate_open", "左键点数据中心入口：入口面板打开，写首领名与三阶段（远征队还在路上）", 20, null, TickGateOpen, retries: 2),
+                S("gate_close", "点入口面板的“关闭”：面板收起", 10, c => JourneyInput.ClickUitk("[WorldPlacesHost]", "EntranceClose"),
+                    c => !PanelOpen ? StepOutcome.Done("入口面板关闭") : c.StepElapsed < 2 ? StepOutcome.Wait : StepOutcome.Retry("点“关闭”后入口面板还开着"), retries: 1),
                 S("sel_b", "左键点一台远征队、Shift 左键加选其余存活的", 60, null, FgjM10Journey.TickSelectTeam, retries: 2),
-                S("gate_go", "右键数据中心入口旁的地面（移动）：远征队都到入口旁", 240, null, TickGateGo),
-                S("gate_open", "左键点数据中心入口：入口面板打开，写首领名与三阶段", 20, null, TickGateOpen, retries: 2),
-                S("gate_enter", "点入口面板的“进入”：远征队进入数据中心（室内地点），余烬主机进门即开战（阶段一·升频）", 60, null, TickGateEnter, retries: 1),
+                S("gate_go", "右键数据中心入口（右键情境命令）：选中的远征队接到“走过去并进入”（字幕写明前往数据中心）", 30, null, TickGateGo),
+                S("gate_enter", "远征队走到入口旁自动进入数据中心（室内地点），余烬主机进门即开战（阶段一·升频）", 240, null, TickGateEnter),
                 S("sel_in", "数据中心里左键点一台、Shift 左键加选其余", 60, null, TickSelectInterior, retries: 2),
                 S("boss_fight", "右键守卫 / 余烬主机（攻击）：阶段一升频 → 本体耐久到 60% 进阶段二·槽位封锁（共用计数 SlotBlockedCount +1、被封槽固件保留不生效）→ 右键数据尖刺逐根打掉 → 夺回（SlotRestoredCount +1）→ 阶段三熔毁倒计时 → 击毁", 900, null, TickBossFight),
                 S("boss_won", "余烬主机击毁：奖励只发一次（核心固件“处决”、首领三选一数据包）、超频领地平定、剧情节点“破译”进资料库、关键材料“超算残核”进核心保管库；封锁全部解除", 30, null, TickBossWon),
@@ -524,17 +529,14 @@ namespace GameLogic.EditorTools.JourneyBots
         private static StepOutcome TickGateGo(JourneyContext c)
         {
             JourneyCommon.ResumeIfAutoPaused(c);
-            PlannedAnchor gate = Gate;
-            List<int> near = InteriorSiteService.MachinesNearEntrance(St, gate);
+            CampaignState s = St;
             List<int> team = AliveTeam(c);
-            if (team.Count > 0 && team.All(near.Contains) && c.GetInt(FgjM3Common.SK(c, "clicked")) == 1)
+            if (c.GetInt(FgjM3Common.SK(c, "clicked")) == 1 && team.Count > 0 && InteriorApproachService.HasIntent(s))
             {
-                return StepOutcome.Done($"右键入口旁 {Cell(V(c, "gate.at"))}：{team.Count} 台都在入口 {gate.EntryRadius} 格内；{TeamHp(c)}");
-            }
-            if ((int)(c.StepElapsed / 15) > c.GetInt(FgjM3Common.SK(c, "log")))
-            {
-                c.SetInt(FgjM3Common.SK(c, "log"), (int)(c.StepElapsed / 15));
-                c.Log($"[{F(c.StepElapsed, "0")}s] 入口旁 {near.Count}/{team.Count}；{string.Join("、", team.Select(id => Label(id) + "@" + Cell(PosOf(id))))}");
+                List<int> ids = s.World.ApproachEnterIds.ToList();
+                return team.All(ids.Contains) && s.World.ApproachEnterAnchorId == Gate?.Id
+                    ? StepOutcome.Done($"右键入口 {Cell(V(c, "gate.at"))}：{team.Count} 台登记“到了就进”（{Gate?.Id}）；{TeamHp(c)}")
+                    : StepOutcome.Fail($"右键入口后进入意图不对：入口 {s.World.ApproachEnterAnchorId}（应为 {Gate?.Id}），机器 [{string.Join("、", ids.Select(Label))}]，远征队 [{string.Join("、", team.Select(Label))}]");
             }
             return RightClickGround(c, V(c, "gate.at"));
         }
@@ -564,6 +566,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         private static StepOutcome TickGateEnter(JourneyContext c)
         {
+            JourneyCommon.ResumeIfAutoPaused(c);
             InteriorSiteController dc = Dc;
             List<int> team = AliveTeam(c);
             bool inside = dc != null && team.Count > 0 && team.All(id => MachineRegistry.TryGetRecord(id, out MachineRecord m) && m.RegionId == Center);
@@ -572,17 +575,18 @@ namespace GameLogic.EditorTools.JourneyBots
                 return c.StepElapsed < 2 ? StepOutcome.Wait
                     : StepOutcome.Done($"进入数据中心：{team.Count} 台在室内；余烬主机开战（{EmberHostBoss.PhaseName(EmberHostBoss.PhaseOf(St))}），入口说明 / 首领 HUD 写名称；进门前自动存档");
             }
-            if (c.GetInt(FgjM3Common.SK(c, "go")) == 0)
+            if (!inside && !InteriorApproachService.HasIntent(St) && !string.IsNullOrEmpty(InteriorApproachService.LastOutcome))
             {
-                if (JourneyInput.ClickUitk("[WorldPlacesHost]", "EntranceGo"))
-                {
-                    c.SetInt(FgjM3Common.SK(c, "go"), 1);
-                }
-                return StepOutcome.Wait;
+                // 意图被取消 / 进入被拒（下了别的命令、走不到、TryEnter 拒绝）：如实失败，写明原因；进去了 LastOutcome 为空（室内载入那几帧照常等）。
+                return StepOutcome.Fail($"“到了就进”意图没了却没进数据中心：{InteriorApproachService.LastOutcome}；{string.Join("、", team.Select(id => Label(id) + "@" + Cell(PosOf(id))))}");
             }
-            string reason = JourneyInput.FindUitk<Label>("[WorldPlacesHost]", "EntranceReason")?.text ?? string.Empty;
-            return c.StepElapsed < 20 ? StepOutcome.Wait
-                : StepOutcome.Fail($"点“进入”后没进数据中心 / 没开战（室内 {dc != null}、在室内 {inside}、开战 {EmberHostBoss.IsEngaged(St)}；面板原因“{reason}”）");
+            if ((int)(c.StepElapsed / 15) > c.GetInt(FgjM3Common.SK(c, "log")))
+            {
+                c.SetInt(FgjM3Common.SK(c, "log"), (int)(c.StepElapsed / 15));
+                List<int> near = InteriorSiteService.MachinesNearEntrance(St, Gate);
+                c.Log($"[{F(c.StepElapsed, "0")}s] 入口旁 {near.Count}/{team.Count}；{string.Join("、", team.Select(id => Label(id) + "@" + Cell(PosOf(id))))}（镜头 {WorldView.ObservedSiteId}、暂停 {GameClock.Paused}）");
+            }
+            return StepOutcome.Wait;
         }
 
         private static StepOutcome TickSelectInterior(JourneyContext c)

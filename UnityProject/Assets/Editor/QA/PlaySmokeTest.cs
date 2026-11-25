@@ -2061,7 +2061,7 @@ namespace GameLogic.EditorTools
         private static void HoverWorld(Vector3 world)
         {
             Camera cam = Camera.main;
-            Vector3 screen = cam != null ? cam.WorldToScreenPoint(world) : Vector3.zero;
+            Vector3 screen = cam != null ? cam.WorldToScreenPoint(BinGames.Sim.ViewOrigin.ToView(world)) : Vector3.zero;
             _buildMouse = new Vector3(screen.x, screen.y, 0f);
             InputRouter.DebugSetReader(new ScriptedReader { Mouse = _buildMouse });
         }
@@ -2641,6 +2641,19 @@ namespace GameLogic.EditorTools
             bool before = SessionState.GetInt(K + "GridBefore", 1) == 1;
             if (SessionState.GetInt(K + "GridToggledBack", 0) == 0)
             {
+                // FG15-PL-01（DEBT-FG15UX01-01）：正式启动路径（GameApp → GameSettings.ApplyQuality）已把设置“后处理”接到 URP 全局 Volume
+                Check(GameLogic.View.PostProcessView.UrpActive && GameLogic.View.PostProcessView.Volume != null
+                      && GameLogic.View.PostProcessView.Volume.enabled == GameSettings.PostProcessEnabled,
+                    $"URP 下进游戏后后处理 Volume 已建、启停跟设置“后处理”（{GameSettings.PostProcessEnabled}）");
+                // FG15-PL-01 修复轮 2：真实运行时的相机组合（世界相机 + UIRoot 的 UI 相机）。-nographics 不渲染、渲染回调不触发，这里用回调同一入口对齐一次再断言
+                var smokeCams = new System.Collections.Generic.List<Camera>(Camera.allCameras);
+                GameLogic.View.PostProcessView.SyncCameras(smokeCams);
+                Camera smokeUi = smokeCams.Find(GameLogic.View.PostProcessView.IsUiOnly);
+                UnityEngine.Rendering.Universal.UniversalAdditionalCameraData smokeUd = smokeUi != null ? UnityEngine.Rendering.Universal.CameraExtensions.GetUniversalAdditionalCameraData(smokeUi) : null;
+                UnityEngine.Rendering.Universal.UniversalAdditionalCameraData smokeMain = Camera.main != null ? UnityEngine.Rendering.Universal.CameraExtensions.GetUniversalAdditionalCameraData(Camera.main) : null;
+                Check(smokeUd != null && smokeMain != null && smokeUd.renderType == UnityEngine.Rendering.Universal.CameraRenderType.Overlay
+                      && smokeMain.renderType == UnityEngine.Rendering.Universal.CameraRenderType.Base && smokeMain.cameraStack.Contains(smokeUi) && !smokeUd.renderPostProcessing,
+                    $"URP 下 UIRoot 的 UI 相机挂成世界相机（{(Camera.main != null ? Camera.main.name : "无")}）的叠加相机、不开后处理（不清掉世界画面、界面不吃泛光 / 暗角；{smokeUi?.name} {smokeUd?.renderType}）");
                 Check(GameSettings.BuildGridLinesEnabled == !before && BuildModeHudUIToolkit.Instance.GridToggleText.Contains(before ? "关" : "开"),
                     $"按 G：格线{(before ? "关掉" : "打开")}，按钮写“{BuildModeHudUIToolkit.Instance?.GridToggleText}”");
                 SessionState.SetInt(K + "GridToggledBack", 1);
@@ -2661,8 +2674,8 @@ namespace GameLogic.EditorTools
         private static void DragWorld(Vector3 from, Vector3 to, int button)
         {
             Camera cam = Camera.main;
-            Vector3 a = cam != null ? cam.WorldToScreenPoint(from) : Vector3.zero;
-            Vector3 b = cam != null ? cam.WorldToScreenPoint(to) : Vector3.zero;
+            Vector3 a = cam != null ? cam.WorldToScreenPoint(BinGames.Sim.ViewOrigin.ToView(from)) : Vector3.zero;
+            Vector3 b = cam != null ? cam.WorldToScreenPoint(BinGames.Sim.ViewOrigin.ToView(to)) : Vector3.zero;
             InputRouter.DebugSetReader(new DragReader
             {
                 From = new Vector3(a.x, a.y, 0f),
@@ -2800,7 +2813,7 @@ namespace GameLogic.EditorTools
                 Finish("归还谷地里找不到可点选的机器");
                 return;
             }
-            ClickWorld(hauler.transform.position);
+            ClickWorld(BinGames.Sim.ViewOrigin.ToWorld(hauler.transform.position));
             SessionState.SetInt(K + "Worker", hauler.LogicId);
             Next(10, $"鼠标左键点选机器 #{hauler.LogicId}");
         }
@@ -2873,7 +2886,7 @@ namespace GameLogic.EditorTools
                 Finish("场景里找不到发电机");
                 return;
             }
-            RightClickWorld(generator.position);
+            RightClickWorld(BinGames.Sim.ViewOrigin.ToWorld(generator.position));
             Next(11, "鼠标右键点受损的发电机（情境命令：下令修复）");
         }
 
@@ -2922,7 +2935,7 @@ namespace GameLogic.EditorTools
             Check(WorldPlanetView.TerrainShown && WorldPlanetView.Terrain != null && WorldPlanetView.Terrain.IsRelief,
                 "建造模式里地貌起伏网格照常显示（半透明地格参考线叠在它上面，FG-GAP-021）");
             Transform core = FindNamed("Building_" + Campaign.Regions.HomeValleyLayout.BuildingTypeCore);
-            RightClickWorld(core != null ? core.position + new Vector3(6f, 0f, 6f) : Vector3.zero);
+            RightClickWorld(core != null ? BinGames.Sim.ViewOrigin.ToWorld(core.position) + new Vector3(6f, 0f, 6f) : Vector3.zero);
             Next(18, "右键（没有选中建筑时右键 = 退出建造模式）");
         }
 
@@ -2979,7 +2992,7 @@ namespace GameLogic.EditorTools
             Check(Campaign.Economy.BuildingOps.IsWorn(generator) && generator.ConstructionState == BuildingConstructionState.Operational,
                 $"发电机受损（耐久 {Campaign.Economy.BuildingOps.Durability(generator):0}）但照常运转");
             Transform genView = FindNamed("Building_" + Campaign.Regions.HomeValleyLayout.BuildingTypeGenerator);
-            RightClickWorld(genView != null ? genView.position : new Vector3(generator.Position.x, 0f, generator.Position.y));
+            RightClickWorld(genView != null ? BinGames.Sim.ViewOrigin.ToWorld(genView.position) : new Vector3(generator.Position.x, 0f, generator.Position.y));
             Next(38, "机器选中时鼠标右键点受损（运转中）的发电机（情境命令：带维修件上门维修）");
         }
 
@@ -3026,7 +3039,7 @@ namespace GameLogic.EditorTools
                 Finish("场景里找不到装配站");
                 return;
             }
-            ClickWorld(station.position);
+            ClickWorld(BinGames.Sim.ViewOrigin.ToWorld(station.position));
             Next(13, "鼠标左键点装配站（打开生产面板）");
         }
 
@@ -3076,7 +3089,7 @@ namespace GameLogic.EditorTools
             Transform station = FindNamed("Building_" + Campaign.Regions.HomeValleyLayout.BuildingTypeAssemblyStation);
             if (station != null)
             {
-                ClickWorld(station.position);
+                ClickWorld(BinGames.Sim.ViewOrigin.ToWorld(station.position));
             }
             Next(16, "再点装配站（重新打开生产面板）");
         }
@@ -3091,7 +3104,7 @@ namespace GameLogic.EditorTools
             Transform station = FindNamed("Building_" + Campaign.Regions.HomeValleyLayout.BuildingTypeAssemblyStation);
             if (station != null)
             {
-                ClickWorld(station.position);
+                ClickWorld(BinGames.Sim.ViewOrigin.ToWorld(station.position));
             }
             Next(14, "再点一次装配站（关闭生产面板）");
         }
@@ -3372,7 +3385,7 @@ namespace GameLogic.EditorTools
                 Finish("场景里找不到解析台");
                 return;
             }
-            ClickWorld(bench.position);
+            ClickWorld(BinGames.Sim.ViewOrigin.ToWorld(bench.position));
             Next(233, "FG2-E2E-01：鼠标左键点解析台（“数据复原”栏，FG-GAP-050 的固件临时来源）");
         }
 
@@ -3837,7 +3850,7 @@ namespace GameLogic.EditorTools
                 return;
             }
             SessionState.SetInt(K + "SigA", m.LogicId);
-            ClickWorld(m.View.transform.position);
+            ClickWorld(BinGames.Sim.ViewOrigin.ToWorld(m.View.transform.position));
             Next(168, $"左键点家园里的机器 {SigLabel(m.LogicId)}");
         }
 
@@ -4036,7 +4049,7 @@ namespace GameLogic.EditorTools
             Check(uplinkOk && registered && View.MachineMorphView.IsRegistered(m.LogicId) && View.MachineMorphView.VisibleOf(m.LogicId) == Campaign.Blueprint.MorphMask.None,
                 $"{SigLabel(m.LogicId)} 换上带接入口的重炮蓝图：AI 驾驶时接入口是空槽，机身不变形（信号核 1 号槽：{core0}）");
             SessionState.SetInt(K + "MorphM", m.LogicId);
-            ClickWorld(m.View.transform.position);
+            ClickWorld(BinGames.Sim.ViewOrigin.ToWorld(m.View.transform.position));
             Next(212, $"左键点 {SigLabel(m.LogicId)}");
         }
 
@@ -4337,7 +4350,7 @@ namespace GameLogic.EditorTools
                 return;
             }
             SessionState.SetInt(K + "LinkM", m.LogicId);
-            ClickWorld(m.View.transform.position);
+            ClickWorld(BinGames.Sim.ViewOrigin.ToWorld(m.View.transform.position));
             Next(186, $"左键点家园里的机器 {SigLabel(m.LogicId)}");
         }
 
@@ -4480,7 +4493,7 @@ namespace GameLogic.EditorTools
             Campaign.Regions.HomeValleyMachineMarker mk = LinkMarker();
             if (mk?.View != null)
             {
-                ClickWorld(mk.View.transform.position);
+                ClickWorld(BinGames.Sim.ViewOrigin.ToWorld(mk.View.transform.position));
             }
             Next(189, $"左键再点 {SigLabel(m)}");
         }
@@ -4871,13 +4884,13 @@ namespace GameLogic.EditorTools
                 if (blocked)
                 {
                     // 机器站在建筑边上被挡住（点到的是建筑）：改用框选（真实拖拽，框选按机器位置判定，不靠射线）——玩家点不中也会这样框。
-                    Vector3 mp = m.View.transform.position;
+                    Vector3 mp = BinGames.Sim.ViewOrigin.ToWorld(m.View.transform.position);
                     Write($"  - {SigLabel(m.LogicId)} 被“{hitName}”挡住：改用拖框选中它");
                     DragWorld(mp + new Vector3(-3f, 0f, -3f), mp + new Vector3(3f, 0f, 3f), 0);
                     Next(178, $"存档前拖框选中 {SigLabel(m.LogicId)}");
                     return;
                 }
-            }            ClickWorld(m.View.transform.position);
+            }            ClickWorld(BinGames.Sim.ViewOrigin.ToWorld(m.View.transform.position));
             Next(178, $"存档前左键点 {SigLabel(m.LogicId)}");
         }
 
@@ -5535,7 +5548,8 @@ namespace GameLogic.EditorTools
                 if (v.Marker != null && v.Marker.Site == site)
                 {
                     Vector2 k = v.Marker.Position;
-                    maxGap = Mathf.Max(maxGap, Vector2.Distance(k, new Vector2(v.transform.position.x, v.transform.position.z)));
+                    Vector3 vw = BinGames.Sim.ViewOrigin.ToWorld(v.transform.position);
+                    maxGap = Mathf.Max(maxGap, Vector2.Distance(k, new Vector2(vw.x, vw.z)));
                 }
             }
             Check(maxGap < 0.5f, $"机器表现对象跟随内核位置插值（最大偏差 {maxGap:F3} 米 < 一步位移）");
@@ -5591,7 +5605,7 @@ namespace GameLogic.EditorTools
             }
             if (unit != 0 && cam != null && site.Kernel.TryGetUnit(unit, out BinGames.Sim.Combat.CombatUnitView view))
             {
-                Vector3 screen = cam.WorldToScreenPoint(new Vector3((float)view.Position.x, 0f, (float)view.Position.y));
+                Vector3 screen = cam.WorldToScreenPoint(BinGames.Sim.ViewOrigin.ToView(view.Position.x, 0f, view.Position.y));
                 InputRouter.DebugSetReader(new ScriptedReader { Mouse = screen });
             }
             // FG9-UX-01（FGR-UX-030 / 051）：停在敌人身上弹的是敌人悬停读数——标题是敌人名字，正文含职能 / 弱点 + 身上每个标签一行（剩余时间与叠层），
@@ -8253,7 +8267,7 @@ namespace GameLogic.EditorTools
             Camera cam = Camera.main;
             if (cam != null && new Plane(Vector3.up, Vector3.zero).Raycast(cam.ScreenPointToRay(new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f)), out float enter))
             {
-                Vector3 mid = cam.ScreenPointToRay(new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f)).GetPoint(enter);
+                Vector3 mid = BinGames.Sim.ViewOrigin.ToWorld(cam.ScreenPointToRay(new Vector3(Screen.width * 0.5f, Screen.height * 0.5f, 0f)).GetPoint(enter));
                 Vector2 toMid = new Vector2(mid.x, mid.z) - at;
                 if (toMid.sqrMagnitude > 1f)
                 {
@@ -11038,7 +11052,7 @@ namespace GameLogic.EditorTools
             {
                 for (int dy = -2; dy <= 3; dy += 5)
                 {
-                    Vector3 v = cam.WorldToViewportPoint(new Vector3(c.X + dx, 0f, c.Y + dy));
+                    Vector3 v = cam.WorldToViewportPoint(BinGames.Sim.ViewOrigin.ToView(new Vector3(c.X + dx, 0f, c.Y + dy)));
                     if (v.z <= 0f || v.x < 0.08f || v.x > 0.92f || v.y < 0.08f || v.y > 0.92f)
                     {
                         return false;
@@ -13550,7 +13564,7 @@ namespace GameLogic.EditorTools
                 return;
             }
             Check(UiEscapeStack.Count == 0 && !InputRouter.ModalUiOpen && !PauseMenuUIToolkit.IsOpen,
-                $"读取最近自动存档：世界读回（槽位 {CampaignSession.ActiveSlotIndex}，核心完好、失败页收起），没有残留的模态与 Esc 栈");
+                $"读取最近自动存档：世界读回（槽位 {CampaignSession.ActiveSlotIndex}，核心完好、失败页收起），没有残留的模态与 Esc 栈（Esc 栈 {UiEscapeStack.Count} 层、顶层 {UiEscapeStack.Top?.GetType().Name ?? "无"}，模态 {InputRouter.ModalUiOpen}，暂停菜单 {PauseMenuUIToolkit.IsOpen}）");
             Campaign.Regions.HomeValleySoftlockGuard.DebugDestroyCore(cs);
             Next(423, "测试捷径：读档后再让核心被毁一次，等失败页出现，再返回主菜单");
         }
@@ -13810,7 +13824,7 @@ namespace GameLogic.EditorTools
         private static void RightClickWorld(Vector3 world)
         {
             Camera cam = Camera.main;
-            Vector3 screen = cam != null ? cam.WorldToScreenPoint(world) : Vector3.zero;
+            Vector3 screen = cam != null ? cam.WorldToScreenPoint(BinGames.Sim.ViewOrigin.ToView(world)) : Vector3.zero;
             InputRouter.DebugSetReader(new ScriptedReader
             {
                 Mouse = new Vector3(screen.x, screen.y, 0f),
@@ -13824,7 +13838,7 @@ namespace GameLogic.EditorTools
         private static void ClickWorld(Vector3 world)
         {
             Camera cam = Camera.main;
-            Vector3 screen = cam != null ? cam.WorldToScreenPoint(world) : Vector3.zero;
+            Vector3 screen = cam != null ? cam.WorldToScreenPoint(BinGames.Sim.ViewOrigin.ToView(world)) : Vector3.zero;
             InputRouter.DebugSetReader(new ScriptedReader
             {
                 Mouse = new Vector3(screen.x, screen.y, 0f),
@@ -13847,7 +13861,7 @@ namespace GameLogic.EditorTools
             {
                 return true;
             }
-            Vector3 s = cam.WorldToScreenPoint(new Vector3(worldXZ.x, 0f, worldXZ.y));
+            Vector3 s = cam.WorldToScreenPoint(BinGames.Sim.ViewOrigin.ToView(new Vector3(worldXZ.x, 0f, worldXZ.y)));
             if (s.z <= 0f || s.x < 8f || s.y < 8f || s.x > Screen.width - 8f || s.y > Screen.height - 8f)
             {
                 blocker = "画面外";
@@ -13877,7 +13891,7 @@ namespace GameLogic.EditorTools
         private static string WorldClickDiag(Vector2 worldXZ)
         {
             Camera cam = Camera.main;
-            Vector3 screen = cam != null ? cam.WorldToScreenPoint(new Vector3(worldXZ.x, 0f, worldXZ.y)) : Vector3.zero;
+            Vector3 screen = cam != null ? cam.WorldToScreenPoint(BinGames.Sim.ViewOrigin.ToView(new Vector3(worldXZ.x, 0f, worldXZ.y))) : Vector3.zero;
             WorldPointClickable(worldXZ, out string blocker);
             return $"屏幕点 ({screen.x:F0},{screen.y:F0}) / 屏幕 {Screen.width}x{Screen.height}；挡住它的界面“{blocker}”；"
                    + $"建筑面板 IsOpen={ProductionPanelUIToolkit.IsOpen} BuildingId={ProductionPanelUIToolkit.BuildingId}";

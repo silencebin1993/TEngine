@@ -818,8 +818,8 @@ namespace GameLogic.Settings
         public static float EffectsDensity => Mathf.Clamp(Data.EffectsDensity, EffectsDensityMin, 1f);
         public static bool PostProcessEnabled => Data.PostProcessEnabled;
 
-        /// <summary>后处理开关的渲染侧接收口：Built-in 管线下没有后处理栈，默认什么都不做；FG15-PL-01（URP 合流）把它接到 Volume 上（DEBT-FG15UX01-01）。</summary>
-        public static Action<bool> PostProcessSink;
+        /// <summary>后处理开关的渲染侧接收口：默认接 URP 全局后处理 Volume（FG15-PL-01，DEBT-FG15UX01-01；Built-in 管线下它什么都不做）。</summary>
+        public static Action<bool> PostProcessSink = GameLogic.View.PostProcessView.Apply;
 
         /// <summary>画质预设：低 / 中 / 高 一次改三个子项；选“自定义”不动子项。</summary>
         public static void SetQualityPreset(int preset)

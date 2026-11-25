@@ -55,7 +55,7 @@ namespace GameLogic.EditorTools.JourneyBots
 
         public static Camera Cam => WorldView.Camera != null ? WorldView.Camera : Camera.main;
 
-        /// <summary>地面点（格坐标 x, y = 世界 x, z）的屏幕位置。</summary>
+        /// <summary>地面点（格坐标 x, y = 世界 x, z）的屏幕位置（FG15-SYS-02 浮动画面原点：先减原点再投屏）。</summary>
         public static Vector3 ScreenOf(Vector2 ground)
         {
             Camera cam = Cam;
@@ -63,11 +63,11 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return OffScreen;
             }
-            Vector3 s = cam.WorldToScreenPoint(new Vector3(ground.x, 0f, ground.y));
+            Vector3 s = cam.WorldToScreenPoint(BinGames.Sim.ViewOrigin.ToView(new Vector3(ground.x, 0f, ground.y)));
             return new Vector3(s.x, s.y, 0f);
         }
 
-        /// <summary>世界点（含高度）的屏幕位置。</summary>
+        /// <summary>画面坐标点（Transform / 碰撞盒位置，含高度）的屏幕位置；世界格坐标先 ViewOrigin.ToView。</summary>
         public static Vector3 ScreenOfWorld(Vector3 world)
         {
             Camera cam = Cam;
@@ -87,7 +87,7 @@ namespace GameLogic.EditorTools.JourneyBots
             {
                 return false;
             }
-            Vector3 v = cam.WorldToViewportPoint(new Vector3(ground.x, 0f, ground.y));
+            Vector3 v = cam.WorldToViewportPoint(BinGames.Sim.ViewOrigin.ToView(new Vector3(ground.x, 0f, ground.y)));
             return v.z > 0f && v.x >= margin && v.x <= 1f - margin && v.y >= margin && v.y <= 1f - margin;
         }
 

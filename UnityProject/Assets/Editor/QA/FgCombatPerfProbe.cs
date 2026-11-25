@@ -140,8 +140,9 @@ namespace GameLogic.EditorTools
                 int foe = 0;
                 int streak = 0;
                 Color32[] px = tex.GetPixels32();
-                foreach (Color32 c in px)
+                foreach (Color32 raw in px)
                 {
+                    Color32 c = GpuProbeColor.ToGammaEquivalent(raw);
                     if (c.b > 200 && c.g > 180 && c.r < 110)
                     {
                         friend++;

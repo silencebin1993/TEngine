@@ -14,6 +14,9 @@ using GameLogic.View;
 using TEngine;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
+using ShadowQuality = UnityEngine.ShadowQuality;
 using UnityEngine.UIElements;
 using Object = UnityEngine.Object;
 
@@ -33,6 +36,7 @@ namespace GameLogic.EditorTools
         private static StringBuilder _report;
         private static int _fail;
         private static int _pass;
+        private static Action<bool> _defaultSink;
 
         [MenuItem("QA/自检/设置/设置全集与重绑（FG15-UX-01）")]
         public static void RunFromMenu()
@@ -59,6 +63,7 @@ namespace GameLogic.EditorTools
             int savedFps = FramePacing.TargetFps;
             int savedVSync = QualitySettings.vSyncCount;
             ShadowQuality savedShadows = QualitySettings.shadows;
+            _defaultSink = GameSettings.PostProcessSink;
             CampaignState savedSession = CampaignSession.Current;
             int savedSlot = CampaignSession.ActiveSlotIndex;
             try
@@ -70,6 +75,7 @@ namespace GameLogic.EditorTools
                 GameSettings.SetLanguage(GameLanguage.ZhCn);
                 Run("A 登记表", CheckCatalog);
                 Run("B 每项生效", CheckEffects);
+                Run("B2 后处理接 URP 全局 Volume（FG15-PL-01，DEBT-FG15UX01-01）", CheckPostProcessVolume);
                 Run("C 显示设置确认 / 还原 / 失败", CheckDisplay);
                 Run("D 每类恢复默认", CheckResetCategories);
                 Run("E 持久化", CheckPersistence);
@@ -98,7 +104,8 @@ namespace GameLogic.EditorTools
                 InputRouter.ClearHoldLatches();
                 InputRouter.Reset();
                 UiEscapeStack.Clear();
-                GameSettings.PostProcessSink = null;
+                GameSettings.PostProcessSink = _defaultSink;
+                PostProcessView.ResetForTests();
                 CampaignSession.Set(savedSlot, savedSession);
                 if (hadPrefs)
                 {
@@ -183,6 +190,100 @@ namespace GameLogic.EditorTools
             int enBad = SettingsCatalog.All.Count(i => i.Name.Contains("⟦"));
             GameSettings.SetLanguage(GameLanguage.ZhCn);
             Expect(badText.Count == 0 && enBad == 0, $"每项名称与分类名中英文本键齐全（中文缺 {badText.Count}、英文缺 {enBad}）" + (badText.Count > 0 ? "：" + string.Join("、", badText) : string.Empty));
+        }
+
+        // ── B2 ──（画面上“开 / 关有别”的像素断言在 GPU 探针 FgPostProcessProbe：PROBE_ONLY=postfx bash tools/unity-gpu-probes.sh）
+        private static void CheckPostProcessVolume()
+        {
+            Expect(PostProcessView.UrpActive, "当前管线是 URP（ProjectSettings 被还原成 Built-in 时这里失败）");
+            Expect(_defaultSink != null && _defaultSink.Method.DeclaringType == typeof(PostProcessView) && _defaultSink.Method.Name == nameof(PostProcessView.Apply),
+                "设置“后处理”的渲染侧接收口默认就是 PostProcessView.Apply（不再是空口）");
+            PostProcessView.ResetForTests();
+            GameSettings.PostProcessSink = _defaultSink;
+            var camGo = new GameObject("__SettingsPostCam") { hideFlags = HideFlags.HideAndDontSave };
+            var overlayGo = new GameObject("__SettingsPostOverlay") { hideFlags = HideFlags.HideAndDontSave };
+            GameObject uiRootGo = null;
+            try
+            {
+                Camera cam = camGo.AddComponent<Camera>();
+                cam.enabled = false;
+                UniversalAdditionalCameraData data = cam.GetUniversalAdditionalCameraData();
+                GameSettings.SetQualityPreset(GameSettings.QualityHigh);
+                PostProcessView.Sync(cam);
+                VolumeProfile prof = PostProcessView.Profile;
+                bool bloomOk = prof != null && prof.TryGet(out Bloom bloom) && bloom.active && bloom.intensity.overrideState && bloom.intensity.value > 0f;
+                bool vigOk = prof != null && prof.TryGet(out Vignette vig) && vig.active && vig.intensity.overrideState && vig.intensity.value > 0f;
+                bool on = PostProcessView.Volume != null && PostProcessView.Volume.isGlobal && PostProcessView.Volume.enabled && PostProcessView.Volume.sharedProfile == prof && data.renderPostProcessing;
+                GameSettings.SetQualityPreset(GameSettings.QualityLow);
+                PostProcessView.Sync(cam);
+                bool off = PostProcessView.Volume != null && !PostProcessView.Volume.enabled && !data.renderPostProcessing;
+                SettingsCatalog.Find("display.post_process").SetBool(true);
+                PostProcessView.Sync(cam);
+                bool toggled = PostProcessView.Volume.enabled && data.renderPostProcessing && GameSettings.QualityPreset == GameSettings.QualityCustom;
+                Expect(bloomOk && vigOk && on && off && toggled,
+                    $"画质高 → 全局 Volume 启用（Bloom + 暗角）且基础相机开后处理；画质低 → Volume 停用、相机关后处理；单独打开“后处理”→ 又生效、预设变“自定义”（{bloomOk}/{vigOk}/{on}/{off}/{toggled}）");
+                Camera overlay = overlayGo.AddComponent<Camera>();
+                overlay.enabled = false;
+                UniversalAdditionalCameraData od = overlay.GetUniversalAdditionalCameraData();
+                od.renderType = CameraRenderType.Overlay;
+                PostProcessView.Sync(overlay);
+                Expect(!od.renderPostProcessing, "叠加相机不单独开后处理（跟基础相机走，避免叠两遍）");
+
+                // FG15-PL-01 修复轮 2：游戏里真正的 UI 相机是 UIRoot 预制体里的基础相机（Depth only、depth 2、只画 UI 层），不是叠加相机。
+                // URP 下它必须被挂成世界相机的叠加相机（否则按 Solid Color 清掉世界画面）且不开后处理（否则界面再吃一遍泛光 / 暗角）；像素反例在 GPU 探针 FgPostProcessProbe 第二段。
+                GameObject uiRootAsset = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/TEngine/Settings/Prefab/UIRoot.prefab");
+                uiRootGo = uiRootAsset != null ? (GameObject)PrefabUtility.InstantiatePrefab(uiRootAsset) : null;
+                Camera uiCam = uiRootGo != null ? uiRootGo.GetComponentInChildren<Camera>(true) : null;
+                Expect(uiCam != null && PostProcessView.IsUiOnly(uiCam) && uiCam.clearFlags == CameraClearFlags.Depth && uiCam.depth > cam.depth,
+                    $"UIRoot 预制体的 UI 相机：只画 UI 层、Depth only、depth 高于世界相机（{uiCam != null}，depth {(uiCam != null ? uiCam.depth : 0f)}）");
+                if (uiCam != null)
+                {
+                    UniversalAdditionalCameraData ud = uiCam.GetUniversalAdditionalCameraData();
+                    GameSettings.SetPostProcessEnabled(true);
+                    var both = new List<Camera> { cam, uiCam };
+                    PostProcessView.SyncCameras(both);
+                    PostProcessView.SyncCameras(both);
+                    int inStack = data.cameraStack.Count(c => c == uiCam);
+                    bool stacked = ud.renderType == CameraRenderType.Overlay && inStack == 1 && !ud.renderPostProcessing && data.renderPostProcessing;
+                    Expect(stacked, $"世界相机 + UIRoot UI 相机：UI 相机转叠加相机、挂进世界相机栈恰好 1 次（重复对齐不重复挂）、不开后处理，世界相机照常开（{ud.renderType}/{inStack}/{ud.renderPostProcessing}/{data.renderPostProcessing}）");
+                    PostProcessView.SyncCameras(new List<Camera> { uiCam });
+                    bool alone = ud.renderType == CameraRenderType.Base && !ud.renderPostProcessing;
+                    cam.depth = uiCam.depth + 1f;
+                    PostProcessView.SyncCameras(both);
+                    bool above = ud.renderType == CameraRenderType.Base && !data.cameraStack.Contains(uiCam) && !ud.renderPostProcessing;
+                    cam.depth = 0f;
+                    Expect(alone && above, $"负向：没有世界相机（切场景空档）→ UI 相机留作基础相机照常画界面、仍不开后处理；世界相机 depth 在 UI 之上 → 不挂、并从它的栈里摘掉（{alone}/{above}）");
+                }
+            }
+            finally
+            {
+                if (uiRootGo != null)
+                {
+                    Object.DestroyImmediate(uiRootGo);
+                }
+                Object.DestroyImmediate(overlayGo);
+                Object.DestroyImmediate(camGo);
+            }
+
+            // 负向：退回 Built-in（只还原 ProjectSettings 4 个文件时的状态）→ 没有后处理栈：只记值、不建 Volume、不抛异常
+            RenderPipelineAsset savedDefault = GraphicsSettings.defaultRenderPipeline;
+            RenderPipelineAsset savedQuality = QualitySettings.renderPipeline;
+            PostProcessView.ResetForTests();
+            try
+            {
+                GraphicsSettings.defaultRenderPipeline = null;
+                QualitySettings.renderPipeline = null;
+                bool builtin = !PostProcessView.UrpActive;
+                GameSettings.SetPostProcessEnabled(false);
+                GameSettings.SetPostProcessEnabled(true);
+                Expect(builtin && PostProcessView.Volume == null && PostProcessView.Enabled, $"负向：Built-in 管线下开关只记值、不建 Volume、不抛异常（{builtin}/{PostProcessView.Volume == null}）");
+            }
+            finally
+            {
+                GraphicsSettings.defaultRenderPipeline = savedDefault;
+                QualitySettings.renderPipeline = savedQuality;
+                PostProcessView.ResetForTests();
+            }
         }
 
         // ── B ──

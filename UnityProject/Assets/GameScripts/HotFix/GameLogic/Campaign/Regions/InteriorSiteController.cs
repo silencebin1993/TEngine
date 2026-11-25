@@ -575,7 +575,7 @@ namespace GameLogic.Campaign.Regions
             if (Mathf.Abs(ray.direction.y) > 1e-4f)
             {
                 float t = -ray.origin.y / ray.direction.y;
-                Vector3 g = ray.origin + ray.direction * t;
+                Vector3 g = BinGames.Sim.ViewOrigin.ToWorld(ray.origin + ray.direction * t); // 画面射线 → 世界坐标再和出口（世界格）比距离
                 float pick = GridContent.TryGetTuning("interior.pick_radius", out float pr) ? pr : 5f;
                 if (t > 0f && (new Vector2(g.x, g.z) - ExitPoint).sqrMagnitude <= pick * pick)
                 {

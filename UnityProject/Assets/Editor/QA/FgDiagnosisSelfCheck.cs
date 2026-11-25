@@ -1760,8 +1760,15 @@ namespace GameLogic.EditorTools
             double sumSlice = 0;
             int sliceFrames = 0;
             const int Passes = 5;
+            int gcDuring = 0; // 计时期间（强制回收之后的分帧推进里）自发的托管堆回收次数，写进性能行
             for (int pass = 0; pass < Passes; pass++)
             {
+                // FG15-PL-01 修复轮 5（测量前提，阈值 1 / 0.4 ms 与计时范围都不变，同 FgWeatherSelfCheck 已批准的“计时外整堆回收”）：
+                // 前面 800 座建筑建场 + 11 次同步整份已把回收额度用到边上，分片长堆上一次回收落进某一帧就是 25～39 ms 的单帧尖峰
+                // （_unity-validate-shard-1.log:1880010/:1880013 回收 1 次；--full 回收 0 次时 0.585 ms）。回收在两次 Step 之间做，不进 LastSliceMs。
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                int gcBefore = GC.CollectionCount(0);
                 RootCauseDiagnosis.Invalidate();
                 bool done = false;
                 while (!done)
@@ -1771,6 +1778,7 @@ namespace GameLogic.EditorTools
                     sumSlice += RootCauseDiagnosis.LastSliceMs;
                     sliceFrames++;
                 }
+                gcDuring += GC.CollectionCount(0) - gcBefore;
             }
             int passFrames = RootCauseDiagnosis.LastPassFrames;
             double avgSlice = sumSlice / sliceFrames;
@@ -1794,7 +1802,7 @@ namespace GameLogic.EditorTools
             double frameUs = watch.Elapsed.TotalMilliseconds * 1000.0 / 600;
             OverlayService.Set(OverlayKind.None);
             double device = maxSlice * HotfixInterpretFactor;
-            PerfLines.Add($"P1 800 座建筑（{reports.Count} 处停工）：分帧诊断一整轮 {passFrames} 帧，每帧平均 {avgSlice:F3} ms、最大 {maxSlice:F3} ms（真机解释执行 ×{HotfixInterpretFactor} 折算最大 {device:F2} ms / 帧）；" +
+            PerfLines.Add($"P1 800 座建筑（{reports.Count} 处停工）：分帧诊断一整轮 {passFrames} 帧，共 {sliceFrames} 帧计时、期间托管堆回收 {gcDuring} 次，每帧平均 {avgSlice:F3} ms、最大 {maxSlice:F3} ms（真机解释执行 ×{HotfixInterpretFactor} 折算最大 {device:F2} ms / 帧）；" +
                           $"同步整份（只在打开面板且手上没有新结果时做一次）{collectMs:F3} ms；堵塞叠加层重建（同步整份诊断 + 标记）{redrawMs:F3} ms；不在刷新点的每帧 {frameUs:F2} µs");
             ExpectPerf(s.BuildingRecords.Length >= 800 && reports.Count > 50 && sameAsSync && passFrames >= 800 / GridContent.TuningInt("diag.slice_buildings"),
                 $"P1 性能：800 座建筑的家园——分帧诊断任何一帧 ≤ {maxSlice:F3} ms（阈值 1 ms，Editor；平均 {avgSlice:F3} ms，阈值 0.4 ms；真机折算最大 {device:F2} ms / 帧），" +

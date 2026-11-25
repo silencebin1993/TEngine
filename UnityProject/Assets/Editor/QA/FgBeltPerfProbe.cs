@@ -142,8 +142,9 @@ namespace GameLogic.EditorTools
                 RenderTexture.active = prev;
                 int belt = 0;
                 int bright = 0;
-                foreach (Color32 c in tex.GetPixels32())
+                foreach (Color32 raw in tex.GetPixels32())
                 {
+                    Color32 c = GpuProbeColor.ToGammaEquivalent(raw);
                     int sum = c.r + c.g + c.b;
                     if (sum > 90 && sum < 300)
                     {

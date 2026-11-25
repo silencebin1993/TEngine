@@ -926,6 +926,9 @@ namespace GameLogic.EditorTools
             Seg("FgEmgLootHintSelfCheck", FgEmgLootHintSelfCheck.Run); // EMG4-LOOT-01：三选一新交互提示、部件通道源与重复部件（FGT-EMG-062 三选一 N 与重复部件部分；FG-GAP-150 标志组件 E 段）
             Seg("FgEmgEpicExitSelfCheck", FgEmgEpicExitSelfCheck.Run); // EMG4-E2E-02：FG-EMG Epic 收尾门禁、四阶段反向场景合集（IC-REQ-022；排在各涌现段之后，同进程时核它们本轮结果）
             Seg(FgReqCoverageSelfCheck.SegmentName, FgReqCoverageSelfCheck.Run); // FG15-QA-02：FGR 需求覆盖矩阵（IC-REQ-020）、登记册清零口径、本卡登记与负向矩阵（只读文档与登记册）
+            // FG15-PL-01：表现泳道合流——PL 自检（URP 切换 / 地形 URP 子着色器 / 材质工厂 / 表现宿主 / 时钟 / 机器 Rig 等，跳过会换场景的 Lab 段）与 URP 材质审计（MERGE-PLAN §5.3）。
+            Seg("PresentationValidate", PresentationValidate.Run);
+            Seg("FgUrpMaterialAudit", FgUrpMaterialAudit.Run);
             // FG15-QA-01 反向旅程全集：回归包清单门禁（tools/reverse_pack.txt）、IC-REQ-022 覆盖矩阵（FG-M0～M14、FG-EMG 1～4、EMG-R × 六类）与本轮运行期交叉核对、
             // 旧断言新口径（不按旧表下标读反应计数、不断言倍率）、一键回归时对照 M10-BASELINE 写回归报告、负向矩阵。必须排在全部段之后（核它们本轮的结果）。
             Seg(FgReversePackSelfCheck.SegmentName, FgReversePackSelfCheck.Run);

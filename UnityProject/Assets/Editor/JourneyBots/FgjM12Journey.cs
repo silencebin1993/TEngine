@@ -1082,7 +1082,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 FgjM3Common.PanTo(g); // 商队放到画面中部再点（画面边缘可能压着命令栏 / 通知）
                 return StepOutcome.Wait;
             }
-            Vector3 screen = JourneyInput.ScreenOfWorld(p + Vector3.up);
+            Vector3 screen = JourneyInput.ScreenOfWorld(BinGames.Sim.ViewOrigin.ToView(p + Vector3.up)); // 商队位置是世界坐标
             string cover = JourneyInput.UiCoverAt(screen);
             if (c.GetInt(FgjM3Common.SK(c, "n")) >= 4)
             {

@@ -2492,7 +2492,7 @@ namespace GameLogic.Campaign.Regions
             {
                 return false;
             }
-            world = ray.GetPoint(enter);
+            world = BinGames.Sim.ViewOrigin.ToWorld(ray.GetPoint(enter)); // 画面射线的地面交点也要加回原点（同上面的物理命中点）
             return true;
         }
 

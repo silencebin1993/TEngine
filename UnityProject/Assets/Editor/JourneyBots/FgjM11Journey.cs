@@ -117,7 +117,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 Seed = TestSeed,
                 TotalTimeoutSeconds = 2400,
                 OnFinish = Cleanup,
-                Version = 1,
+                Version = 2, // FG15-PL-01 修复轮 4：入口段改为先看面板、再右键入口“走过去并进入”（步骤顺序变了，旧断点作废）
                 CheckpointAfter = Checkpoints,
                 Steps = steps,
             };

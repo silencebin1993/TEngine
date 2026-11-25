@@ -147,7 +147,7 @@ namespace GameLogic.EditorTools.JourneyBots
                 Seed = seed,
                 TotalTimeoutSeconds = 3000,
                 OnFinish = Cleanup,
-                Version = 1,
+                Version = 2, // FG15-PL-01 修复轮 4：清洗三波改右键来犯者迎击（步骤语义变了，旧断点作废）
                 CheckpointAfter = Checkpoints,
                 Steps = steps,
             };
@@ -554,8 +554,8 @@ namespace GameLogic.EditorTools.JourneyBots
                 yield return S($"p{w}_sel", "左键点第一台、Shift 左键加选全部作战队", 90, null, c => FgjM12Journey.SelectMachines(c, FreeTeam(c), "作战队"), retries: 2);
                 yield return S($"p{w}_hold", "按守卫键（默认 G）：每台守自己的驻防点", 15, c => JourneyInput.PressAction(GameActionId.CommandGuard), c => TickWaveHold(c, w, "全队"), retries: 1);
                 yield return S($"p{w}_fight", w < PurgeWaveService.WaveCount
-                    ? $"守住第 {w} 波：登陆舱落地投放清洗无人机、驻防的作战队迎击、维修无人机修核心 → 这一波打完"
-                    : "守住第 3 波 → 撑过 3 波：三波都在预警时自动存档、轨道打击提前 30 秒在顶栏标出落点", 900, null, c => TickWaveFight(c, w));
+                    ? $"守住第 {w} 波：登陆舱落地投放清洗无人机、作战队右键来犯者迎击（清洗 6 游戏小时才撤）、维修无人机修核心 → 这一波打完"
+                    : "守住第 3 波（作战队右键来犯者迎击）→ 撑过 3 波：三波都在预警时自动存档、轨道打击提前 30 秒在顶栏标出落点", 900, null, c => TickWaveFight(c, w));
             }
         }
 
@@ -708,17 +708,34 @@ namespace GameLogic.EditorTools.JourneyBots
             }
             CampaignState s = St;
             PurgeWaveState p = PurgeWaveService.StateOf(s);
+            // FG15-PL-01 修复轮 4（旅程跟着系统改，M10-BASELINE 第 846 / 870 行）：FG15-BAL-01 起清洗波次到达后 raid.purge.time_limit_hours = 6 游戏小时才撤（以前 1 小时），
+            // 只守驻防点时来犯者在射程外围着核心打、不掉血（第 3 波 69 台、核心 1600 → 0）。正式打法同 FGJ-M14 p_fight：全队仍选中，
+            // 右键离作战队最近的来犯者（RTS 右键敌人 = 攻击），目标换了或每 3 秒再右键一次；打到损失过重它们照常撤。
+            List<(int Id, Vector2 Pos)> raiders = FgjM6Common.Raiders();
+            List<int> team = FreeTeam(c);
+            if (raiders.Count > 0 && team.Count > 0 && !JourneyInput.Holding)
+            {
+                Vector2 center = team.Aggregate(Vector2.zero, (a, x) => a + FgjM8Journey.PosOf(x)) / team.Count;
+                (int Id, Vector2 Pos) t = raiders.OrderBy(r => (r.Pos - center).sqrMagnitude).First();
+                string kt = FgjM3Common.SK(c, "tgt"), ka = FgjM3Common.SK(c, "rcAt");
+                if ((c.GetInt(kt) != t.Id || FgjM2Common.NowMs() - c.GetLong(ka) > 3000) && FgjM3Common.TryClick(t.Pos, 1))
+                {
+                    c.SetInt(kt, t.Id);
+                    c.SetLong(ka, FgjM2Common.NowMs());
+                    c.SetInt("pg.rc" + w, c.GetInt("pg.rc" + w) + 1);
+                }
+            }
             if (w < PurgeWaveService.WaveCount)
             {
                 return p.Cleared >= w
-                    ? StepOutcome.Done($"第 {w} 波打完（同时在场的来犯者最多 {c.GetInt("pg.raiders_max")} 台；核心耐久 {F(FgjM6Common.Core(s)?.Health ?? -1, "0")}；维修件 {HomeInventory.Stock(s, BuildingOps.RepairKitId)}）；{TeamHp(c)}")
+                    ? StepOutcome.Done($"第 {w} 波打完（同时在场的来犯者最多 {c.GetInt("pg.raiders_max")} 台；右键来犯者 {c.GetInt("pg.rc" + w)} 次；核心耐久 {F(FgjM6Common.Core(s)?.Health ?? -1, "0")}；维修件 {HomeInventory.Stock(s, BuildingOps.RepairKitId)}）；{TeamHp(c)}")
                     : StepOutcome.Wait;
             }
             if (!PurgeWaveService.Done(s))
             {
                 return StepOutcome.Wait;
             }
-            string msg = $"撑过 3 波（同时在场的来犯者最多 {c.GetInt("pg.raiders_max")} 台；维修站供电夹具补置 {c.GetInt("def.reassert")} 次；核心耐久 {F(FgjM6Common.Core(s)?.Health ?? -1, "0")}；维修件 {HomeInventory.Stock(s, BuildingOps.RepairKitId)}）；每波预警自动存档到第 {c.GetInt("pg.saved_max")} 波；轨道打击 30 秒内落点倒计时在顶栏出现过 {c.GetInt("pg.strike_seen") == 1}；{TeamHp(c)}";
+            string msg = $"撑过 3 波（同时在场的来犯者最多 {c.GetInt("pg.raiders_max")} 台；第 3 波右键来犯者 {c.GetInt("pg.rc" + w)} 次；维修站供电夹具补置 {c.GetInt("def.reassert")} 次；核心耐久 {F(FgjM6Common.Core(s)?.Health ?? -1, "0")}；维修件 {HomeInventory.Stock(s, BuildingOps.RepairKitId)}）；每波预警自动存档到第 {c.GetInt("pg.saved_max")} 波；轨道打击 30 秒内落点倒计时在顶栏出现过 {c.GetInt("pg.strike_seen") == 1}；{TeamHp(c)}";
             return c.GetInt("pg.saved_max") >= 3 && c.GetInt("pg.strike_seen") == 1 ? StepOutcome.Done(msg) : StepOutcome.Fail(msg + "（要求三波都在预警时存档、看到轨道打击预警）");
         }
 
